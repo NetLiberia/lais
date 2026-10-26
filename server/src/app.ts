@@ -11,6 +11,7 @@ import { auditRouter } from './routes/audit.js';
 import { authRouter } from './routes/auth.js';
 import { casesRouter } from './routes/cases.js';
 import { documentsRouter } from './routes/documents.js';
+import { documentRequestsRouter } from './routes/documentRequests.js';
 import { meRouter } from './routes/me.js';
 import { parcelsRouter } from './routes/parcels.js';
 import { partiesRouter } from './routes/parties.js';
@@ -34,6 +35,7 @@ export function createApp() {
   internal.use(requireActiveSession, csrfProtect);
   internal.use('/cases', casesRouter);
   internal.use('/documents', documentsRouter);
+  internal.use('/document-requests', documentRequestsRouter);
   internal.use('/parcels', parcelsRouter);
   internal.use('/parties', partiesRouter);
   internal.use('/admin', adminRouter);

@@ -14,6 +14,9 @@ import { AuditLog } from './pages/AuditLog';
 import { AdminUsers } from './pages/AdminUsers';
 import { MyParcels } from './pages/MyParcels';
 import { Account } from './pages/Account';
+import { DocumentRequestDetail, DocumentRequestList } from './pages/DocumentRequests';
+
+const DOCREQUEST_ROLES = ['processor', 'registrar', 'supervisor', 'auditor'];
 
 function RequireSession({ roles, children }: { roles?: string[]; children: ReactNode }) {
   const { session, hasRole } = useAuth();
@@ -50,6 +53,7 @@ function Header() {
       <nav>
         <NavLink to="/" end>Public map</NavLink>
         {active && hasRole(...INTERNAL_ROLES) && <NavLink to="/work">Cases</NavLink>}
+        {active && hasRole(...DOCREQUEST_ROLES) && <NavLink to="/work/document-requests">Document requests</NavLink>}
         {active && hasRole('processor', 'registrar') && <NavLink to="/work/parties">Parties</NavLink>}
         {active && hasRole('supervisor', 'auditor', 'system_admin') && <NavLink to="/work/audit">Audit</NavLink>}
         {active && hasRole('system_admin') && <NavLink to="/work/admin">Users</NavLink>}
@@ -89,6 +93,8 @@ export function App() {
           <Route path="/work/cases/new" element={<RequireSession roles={['gis_officer', 'processor']}><NewCase /></RequireSession>} />
           <Route path="/work/cases/:id" element={<RequireSession roles={INTERNAL_ROLES}><CaseDetail /></RequireSession>} />
           <Route path="/work/parcels/:upi" element={<RequireSession roles={INTERNAL_ROLES}><ParcelRecord /></RequireSession>} />
+          <Route path="/work/document-requests" element={<RequireSession roles={DOCREQUEST_ROLES}><DocumentRequestList /></RequireSession>} />
+          <Route path="/work/document-requests/:id" element={<RequireSession roles={DOCREQUEST_ROLES}><DocumentRequestDetail /></RequireSession>} />
           <Route path="/work/parties" element={<RequireSession roles={['processor', 'registrar']}><Parties /></RequireSession>} />
           <Route path="/work/audit" element={<RequireSession roles={['supervisor', 'auditor', 'system_admin']}><AuditLog /></RequireSession>} />
           <Route path="/work/admin" element={<RequireSession roles={['system_admin']}><AdminUsers /></RequireSession>} />

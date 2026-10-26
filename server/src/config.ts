@@ -34,6 +34,8 @@ export const config = {
   overlapToleranceM2: number('OVERLAP_TOLERANCE_M2', 1),
   duplicateHausdorffM: number('DUPLICATE_HAUSDORFF_M', 2),
   minParcelAreaM2: number('MIN_PARCEL_AREA_M2', 10),
+  /** How long a landowner can download documents released to them. */
+  documentReleaseDays: number('DOCUMENT_RELEASE_DAYS', 30),
   /** Largest gap or excess allowed between the new parcels and the parcels they replace. */
   coverageToleranceM2: number('COVERAGE_TOLERANCE_M2', 1),
 };

@@ -78,8 +78,14 @@ const RULES = {
   'audit.view_technical': { roles: ['system_admin'], scope: 'global' },
   'user.manage': { roles: ['system_admin'], scope: 'global' },
 
+  // Document requests from landowners (status rules are enforced by the route and a database trigger)
+  'docrequest.view': { roles: ['processor', 'registrar', 'supervisor', 'auditor'], scope: 'county' },
+  'docrequest.prepare': { roles: ['processor'], scope: 'county' },
+  'docrequest.decide': { roles: ['registrar'], scope: 'county', separation: 'not_contributor' },
+
   // External users
   'landowner.view_own': { roles: ['landowner'], scope: 'global' },
+  'landowner.request_documents': { roles: ['landowner'], scope: 'global' },
 } as const satisfies Record<string, Rule>;
 
 export type Action = keyof typeof RULES;

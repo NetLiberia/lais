@@ -568,4 +568,125 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
       expect(res.body.events.every((e: any) => /^(auth|admin)\./.test(e.action))).toBe(true);
     });
   });
+
+  describe('landowner document requests', () => {
+    let deedId = '';
+    let idDocId = '';
+    let requestId = '';
+
+    async function publishTransfer(upi: string, toParty: string, extraDocs = false) {
+      const created = await as('proc.mo').post('/api/cases', { caseType: 'transfer', parcelUpi: upi, sourceReference: 'SYNTHETIC-TRANSFER' });
+      const id = created.body.id;
+      expect((await as('proc.mo').post(`/api/cases/${id}/rights`, { partyId: await partyId(toParty), rrrType: 'ownership' })).status).toBe(201);
+      const deed = await as('proc.mo').upload(`/api/cases/${id}/documents`, fixture('synthetic_document.pdf'), 'deed.pdf', { docType: 'deed', classification: 'restricted', referenceNo: 'DEED-DR' });
+      await as('proc2.mo').post(`/api/cases/${id}/documents/${deed.body.id}/verify`, { status: 'verified', note: 'Deed checked' });
+      let idDoc = '';
+      if (extraDocs) {
+        const doc = await as('proc.mo').upload(`/api/cases/${id}/documents`, fixture('synthetic_document.pdf'), 'id.pdf', { docType: 'id_document', classification: 'highly_sensitive' });
+        await as('proc2.mo').post(`/api/cases/${id}/documents/${doc.body.id}/verify`, { status: 'verified', note: 'ID checked' });
+        idDoc = doc.body.id;
+      }
+      expect((await as('proc.mo').post(`/api/cases/${id}/submit`)).body.status).toBe('under_review');
+      await acknowledgeAll(id);
+      expect((await approve(id)).status).toBe(200);
+      expect((await as('reg.mo').post(`/api/cases/${id}/publish`)).status).toBe(200);
+      return { deed: deed.body.id as string, idDoc };
+    }
+
+    it('sets up: PROV-MO-000010 is transferred to the landowner, with a deed and an ID document', async () => {
+      ({ deed: deedId, idDoc: idDocId } = await publishTransfer('PROV-MO-000010', 'Musu', true));
+    });
+
+    it('refuses requests for parcels the landowner does not hold, without revealing whether they exist', async () => {
+      const notMine = await as('owner.demo').post('/api/me/document-requests', { parcelUpi: 'PROV-MO-000002', documentTypes: ['deed'], purpose: 'Checking a neighbour' });
+      const unknown = await as('owner.demo').post('/api/me/document-requests', { parcelUpi: 'PROV-MO-999999', documentTypes: ['deed'], purpose: 'Checking a neighbour' });
+      expect(notMine.status).toBe(403);
+      expect(unknown.status).toBe(403);
+      expect(notMine.body.error).toBe(unknown.body.error);
+      expect((await as('proc.mo').post('/api/me/document-requests', { parcelUpi: 'PROV-MO-000010', documentTypes: ['deed'], purpose: 'Staff should not use this' })).status).toBe(403);
+    });
+
+    it('lets the landowner request documents for their own parcel', async () => {
+      const res = await as('owner.demo').post('/api/me/document-requests', { parcelUpi: 'PROV-MO-000010', documentTypes: ['deed', 'survey_plan'], purpose: 'Needed for a bank loan application' });
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe('submitted');
+      requestId = res.body.id;
+      const mine = (await as('owner.demo').get('/api/me/document-requests')).body;
+      expect(mine[0]).toMatchObject({ request_no: res.body.request_no, status: 'submitted', released_documents: null });
+    });
+
+    it('limits the staff queue to authorized roles', async () => {
+      expect((await as('gis.mo').get('/api/document-requests')).status).toBe(403);
+      expect((await as('admin').get('/api/document-requests')).status).toBe(403);
+      expect((await as('auditor').get('/api/document-requests')).body.map((r: any) => r.id)).toContain(requestId);
+    });
+
+    it('offers only verified documents from published cases, and never highly sensitive ones', async () => {
+      const detail = (await as('proc.mo').get(`/api/document-requests/${requestId}`)).body;
+      expect(detail.allowedActions).toEqual(['prepare']);
+      const deed = detail.candidates.find((c: any) => c.id === deedId);
+      const idDoc = detail.candidates.find((c: any) => c.id === idDocId);
+      expect(deed.releasable).toBe(true);
+      expect(idDoc.releasable).toBe(false);
+      const bad = await as('proc.mo').post(`/api/document-requests/${requestId}/prepare`, { documentIds: [deedId, idDocId], note: 'Trying to include the ID' });
+      expect(bad.status).toBe(400);
+      // The database refuses it too, whatever the API does.
+      await expect(pool.query('INSERT INTO lais.document_request_item (request_id, document_id) VALUES ($1, $2)', [requestId, idDocId])).rejects.toThrow(/Highly sensitive/);
+    });
+
+    it('needs a processor to prepare and a registrar to decide', async () => {
+      expect((await as('reg.mo').post(`/api/document-requests/${requestId}/prepare`, { documentIds: [deedId], note: 'Registrar preparing' })).status).toBe(403);
+      expect((await as('proc.mo').post(`/api/document-requests/${requestId}/prepare`, { documentIds: [deedId], note: 'Deed from the transfer case' })).status).toBe(200);
+      expect((await as('proc.mo').post(`/api/document-requests/${requestId}/decide`, { decision: 'approved', reason: 'Processor approving' })).status).toBe(403);
+      expect((await as('reg.mo').post(`/api/document-requests/${requestId}/decide`, { decision: 'approved', reason: 'Requester holds the registered interest' })).status).toBe(200);
+      await expect(pool.query('DELETE FROM lais.document_request_item WHERE request_id = $1', [requestId])).rejects.toThrow(/cannot be changed/);
+    });
+
+    it('lets the landowner download released documents only, and logs each download', async () => {
+      const mine = (await as('owner.demo').get('/api/me/document-requests')).body.find((r: any) => r.id === requestId);
+      expect(mine.status).toBe('approved');
+      expect(mine.release_active).toBe(true);
+      expect(mine.released_documents.map((d: any) => d.id)).toEqual([deedId]);
+
+      const file = await as('owner.demo').get(`/api/me/document-requests/${requestId}/documents/${deedId}/file`);
+      expect(file.status).toBe(200);
+      expect(file.headers['content-type']).toBe('application/pdf');
+      expect((await as('owner.demo').get(`/api/me/document-requests/${requestId}/documents/${idDocId}/file`)).status).toBe(403);
+      // The landowner still cannot reach the internal document endpoint.
+      expect((await as('owner.demo').get(`/api/documents/${deedId}/file`)).status).toBe(403);
+      const { rows } = await pool.query(`SELECT * FROM audit.event WHERE action = 'document.release_download' AND entity_id = $1`, [deedId]);
+      expect(rows).toHaveLength(1);
+    });
+
+    it('stops downloads once the landowner no longer holds the interest', async () => {
+      await publishTransfer('PROV-MO-000010', 'Hawa');
+      const res = await as('owner.demo').get(`/api/me/document-requests/${requestId}/documents/${deedId}/file`);
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/no longer hold/);
+    });
+
+    it('allows a release to be cut short but never extended', async () => {
+      await expect(pool.query(`UPDATE lais.document_request SET release_expires_at = release_expires_at + interval '1 day' WHERE id = $1`, [requestId])).rejects.toThrow(/closed/);
+      await pool.query(`UPDATE lais.document_request SET release_expires_at = now() - interval '1 second' WHERE id = $1`, [requestId]);
+      const res = await as('owner.demo').get(`/api/me/document-requests/${requestId}/documents/${deedId}/file`);
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/release period/);
+    });
+
+    it('records a refusal with a reason the landowner can see', async () => {
+      const created = await as('owner.demo').post('/api/me/document-requests', { parcelUpi: 'PROV-MO-000011', documentTypes: ['survey_plan'], purpose: 'Planning a fence along the boundary' });
+      const id = created.body.id;
+      expect((await as('proc.mo').post(`/api/document-requests/${id}/prepare`, { documentIds: [], note: 'No survey plan on file for this parcel' })).status).toBe(200);
+      expect((await as('reg.mo').post(`/api/document-requests/${id}/decide`, { decision: 'approved', reason: 'Nothing to release' })).status).toBe(409);
+      expect((await as('reg.mo').post(`/api/document-requests/${id}/decide`, { decision: 'refused', reason: 'No survey plan is held for this parcel; contact the county office' })).status).toBe(200);
+      const mine = (await as('owner.demo').get('/api/me/document-requests')).body.find((r: any) => r.id === id);
+      expect(mine).toMatchObject({ status: 'refused', decision_reason: 'No survey plan is held for this parcel; contact the county office', released_documents: null });
+    });
+
+    it('lets the landowner withdraw an undecided request', async () => {
+      const created = await as('owner.demo').post('/api/me/document-requests', { parcelUpi: 'PROV-MO-000011', documentTypes: ['deed'], purpose: 'No longer needed after all' });
+      expect((await as('owner.demo').post(`/api/me/document-requests/${created.body.id}/withdraw`)).status).toBe(200);
+      expect((await as('proc.mo').post(`/api/document-requests/${created.body.id}/prepare`, { documentIds: [], note: 'Too late' })).status).toBe(409);
+    });
+  });
 });

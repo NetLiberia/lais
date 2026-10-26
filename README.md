@@ -26,6 +26,7 @@ Phase 3 prototype for the MSc project *Development and Evaluation of a Privacy-A
 | Authentication: scrypt hashes, progressive lockout, server-side sessions (hash-only token storage), CSRF tokens, optional mandatory TOTP MFA for privileged roles | `server/src/auth/*`, `routes/auth.ts` |
 | Append-only, hash-chained audit log with tamper detection | `003_audit.sql`, `routes/audit.ts` |
 | Landowner portal: only interests registered to parties linked to the account by staff | `routes/me.ts`, `pages/MyParcels.tsx` |
+| Landowner document requests: a landowner asks for copies on a parcel where they hold a registered interest; a processor chooses verified documents from published cases; a different registrar approves or refuses with a reason; copies can be downloaded for `DOCUMENT_RELEASE_DAYS`. Eligibility is re-checked at every download, highly sensitive documents are never released (enforced in the database too), and every download is audited | `routes/me.ts`, `routes/documentRequests.ts`, `005_document_requests.sql` |
 
 ## Architecture
 
@@ -94,7 +95,7 @@ npm test
 ```
 
 - **36 unit tests**: permission matrix, cross-county denial, separation of duties, workflow (including a check that the TypeScript transition table matches the SQL trigger), TOTP RFC test vectors, password hashing, GeoJSON/CRS intake, fractional shares, file sniffing.
-- **40 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration, transfer, subdivision and consolidation lifecycles, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, and admin limits.
+- **51 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration, transfer, subdivision and consolidation lifecycles, landowner document requests, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, and admin limits.
 
 ## Demo accounts (synthetic)
 
@@ -125,11 +126,14 @@ Other fixtures: `adjacent_touching` (expected: no conflict), `duplicate_of_mo5`,
 
 **Subdivision:** as gis.mo, open a *Subdivision* of PROV-MO-000008 and import `subdivide_mo8_halves_4326.geojson`. Then, as proc.mo, use *Copy current ownership to each new parcel*. `subdivide_mo8_gap_4326` and `subdivide_mo8_overlap_4326` show the coverage and overlap errors. After publishing, `consolidate_mo8_halves_4326` merges the two halves back together.
 
+**Document request:** documents can be released only from published cases, and seeded parcels have none. So first publish a transfer of, for example, PROV-MO-000010 to *Musu Testperson*, with a verified deed. Then sign in as owner.demo → *My land* → *Request documents*. proc.mo prepares the release under *Document requests*, reg.mo decides, and owner.demo downloads the copy.
+
 ## Known limits of this prototype
 
 - One parcel per registration case; multi-parcel batch import of new registrations is a later phase. Subdivision accepts up to 50 new parcels per case.
 - Subdivision and consolidation give every resulting parcel the same land category and use, set on the case.
-- No malware scanning of uploads (the hook point is marked in `routes/cases.ts`), no e-mail or SMS notifications, no document-request workflow for landowners.
+- No malware scanning of uploads (the hook point is marked in `routes/cases.ts`) and no e-mail or SMS notifications; landowners check request status in the portal.
+- Released documents are the stored files themselves; there is no certified-copy watermarking or fee handling.
 - Conflict tolerances (`OVERLAP_TOLERANCE_M2`, `DUPLICATE_HAUSDORFF_M`, `MIN_PARCEL_AREA_M2`, `COVERAGE_TOLERANCE_M2`) and the public field list (`PUBLIC_PARCEL_FIELDS`) are placeholders until the cadastral authority and the disclosure policy define them.
 - The audit chain resists tampering by application users, but a database superuser can still alter it. For higher assurance, run `server/db/roles.sql` so the app uses a least-privilege role, and ship events to a separate log store.
 - Map tiles come from OpenStreetMap's public servers, so the browser fetches them from the internet.
