@@ -12,10 +12,11 @@ import { enforce } from '../authz/enforce.js';
 import { authorize, scopeFor, type Action } from '../authz/policy.js';
 import { CASE_STATUSES } from '../authz/workflow.js';
 import { caseContext, getCase, inCaseTx, recordEvent, setStatus } from '../services/cases.js';
-import { ACCEPTED_SRIDS, extractSingleFeature } from '../services/geojson.js';
+import { ACCEPTED_SRIDS, extractFeatures, FEATURE_LIMITS } from '../services/geojson.js';
 import { computeSnapshot } from '../services/snapshot.js';
 import { evaluateCase, latestRun, persistRun, PROVISIONAL_UPI_PATTERN } from '../services/validation.js';
 import { publishApprovedCase } from '../services/publication.js';
+import { OWNERSHIP_TYPES } from '../services/shares.js';
 import { detectDocumentType } from '../services/files.js';
 
 export const casesRouter = Router();
@@ -89,6 +90,16 @@ const createBody = z.discriminatedUnion('caseType', [
     parcelUpi: z.string().min(1).max(40),
     sourceReference: z.string().max(200).optional(),
   }),
+  z.object({
+    caseType: z.literal('subdivision'),
+    parcelUpi: z.string().min(1).max(40),
+    sourceReference: z.string().max(200).optional(),
+  }),
+  z.object({
+    caseType: z.literal('consolidation'),
+    parcelUpis: z.array(z.string().min(1).max(40)).min(2).max(20),
+    sourceReference: z.string().max(200).optional(),
+  }),
 ]);
 
 casesRouter.post('/', async (req, res) => {
@@ -96,16 +107,40 @@ casesRouter.post('/', async (req, res) => {
   const created = await tx(async (client) => {
     let countyId: number;
     let parcelId: string | null = null;
-    if (body.caseType === 'transfer') {
-      // Jurisdiction comes from the published parcel, not from the request.
-      const { rows: [parcel] } = await client.query('SELECT id, county_id FROM lais.parcel WHERE upi = $1', [body.parcelUpi]);
-      if (!parcel) throw notFound('No published parcel has that identifier');
-      countyId = parcel.county_id;
-      parcelId = parcel.id;
-    } else {
+    let sourceIds: string[] = [];
+    let landCategory: string | null = null;
+    let landUse: string | null = null;
+
+    if (body.caseType === 'first_registration') {
       countyId = body.countyId;
       const exists = await client.query('SELECT 1 FROM lais.county WHERE id = $1', [countyId]);
       if (!exists.rows[0]) throw badRequest('Unknown county');
+      landCategory = body.landCategory ?? null;
+      landUse = body.landUse ?? null;
+    } else {
+      // Jurisdiction comes from the published parcels, not from the request.
+      const upis = body.caseType === 'consolidation' ? [...new Set(body.parcelUpis)] : [body.parcelUpi];
+      if (body.caseType === 'consolidation' && upis.length < 2) throw badRequest('List at least two different parcels to merge');
+      const { rows: parcels } = await client.query(
+        `SELECT p.id, p.upi, p.county_id, p.status, v.land_category, v.land_use
+           FROM lais.parcel p LEFT JOIN lais.parcel_version v ON v.id = p.current_version_id
+          WHERE p.upi = ANY($1)`,
+        [upis],
+      );
+      const missing = upis.filter((u) => !parcels.some((p) => p.upi === u));
+      if (missing.length) throw notFound(`No published parcel has the identifier ${missing.join(', ')}`);
+      const retired = parcels.filter((p) => p.status === 'retired');
+      if (retired.length) throw conflict(`Parcel ${retired.map((p) => p.upi).join(', ')} is retired`);
+      if (new Set(parcels.map((p) => p.county_id)).size > 1) throw badRequest('All parcels in a case must be in the same county');
+      countyId = parcels[0].county_id;
+      if (body.caseType === 'transfer') {
+        parcelId = parcels[0].id;
+      } else {
+        sourceIds = parcels.map((p) => p.id);
+        // New parcels start with the category and use of their source; officers can change them before submitting.
+        landCategory = parcels[0].land_category;
+        landUse = parcels[0].land_use;
+      }
     }
     enforce(req, 'case.create', { countyId }, { entityType: 'case' });
 
@@ -116,13 +151,16 @@ casesRouter.post('/', async (req, res) => {
         body.caseType,
         countyId,
         parcelId,
-        body.caseType === 'first_registration' ? body.landCategory ?? null : null,
-        body.caseType === 'first_registration' ? body.landUse ?? null : null,
+        landCategory,
+        landUse,
         body.sourceReference ?? null,
         body.caseType === 'first_registration' ? body.proposedUpi ?? null : null,
         req.auth!.user.id,
       ],
     );
+    for (const sourceId of sourceIds) {
+      await client.query('INSERT INTO lais.case_source_parcel (case_id, parcel_id) VALUES ($1, $2)', [cs.id, sourceId]);
+    }
     await recordEvent(client, cs.id, req.auth!.user.id, 'create', null, null, 'draft');
     await writeAudit(req, { action: 'case.create', outcome: 'success', entityType: 'case', entityId: cs.id, caseId: cs.id, countyId, detail: { caseNo: cs.case_no, caseType: body.caseType } }, client);
     return cs;
@@ -150,9 +188,9 @@ casesRouter.get('/:id', async (req, res) => {
       [cs.id],
     ),
     pool.query(
-      `SELECT r.id, r.rrr_type, r.share_num, r.share_den, p.id AS party_id, p.name AS party_name, p.party_type, p.identity_status
+      `SELECT r.id, r.rrr_type, r.share_num, r.share_den, r.feature_index, p.id AS party_id, p.name AS party_name, p.party_type, p.identity_status
          FROM lais.case_right_proposal r JOIN lais.party p ON p.id = r.party_id
-        WHERE r.case_id = $1 ORDER BY r.created_at`,
+        WHERE r.case_id = $1 ORDER BY r.feature_index NULLS FIRST, r.created_at`,
       [cs.id],
     ),
     pool.query(
@@ -167,11 +205,15 @@ casesRouter.get('/:id', async (req, res) => {
     ),
     pool.query(
       `SELECT b.id AS batch_id, b.source_filename, b.declared_srid, b.created_at, u.username AS uploaded_by,
-              f.structural_ok, f.structural_message,
-              ST_AsGeoJSON(coalesce(f.geom, ST_Transform(f.geom_input, 4326)), 7)::json AS geometry,
-              CASE WHEN f.geom IS NOT NULL THEN round(ST_Area(f.geom::geography)::numeric, 2) END AS area_m2
+              coalesce((SELECT json_agg(json_build_object(
+                         'index', f.feature_index,
+                         'structural_ok', f.structural_ok,
+                         'structural_message', f.structural_message,
+                         'geometry', ST_AsGeoJSON(coalesce(f.geom, ST_Transform(f.geom_input, 4326)), 7)::json,
+                         'area_m2', CASE WHEN f.geom IS NOT NULL THEN round(ST_Area(f.geom::geography)::numeric, 2) END)
+                         ORDER BY f.feature_index)
+                         FROM staging.feature f WHERE f.batch_id = b.id), '[]'::json) AS features
          FROM staging.batch b
-         JOIN staging.feature f ON f.batch_id = b.id
          JOIN lais.app_user u ON u.id = b.uploaded_by
         WHERE b.case_id = $1 AND b.status IN ('active', 'published')
         ORDER BY b.created_at DESC LIMIT 1`,
@@ -199,6 +241,26 @@ casesRouter.get('/:id', async (req, res) => {
     latestRun(pool, cs.id),
   ]);
 
+  // Parcels a subdivision or consolidation replaces, and the parcels it created once published.
+  const { rows: sources } = await pool.query(
+    `SELECT p.id, p.upi, p.status, v.land_category, v.land_use, v.area_m2_calculated,
+            ST_AsGeoJSON(v.geom, 7)::json AS geometry,
+            coalesce((SELECT json_agg(json_build_object('rrrType', r.rrr_type, 'share', CASE WHEN r.share_den IS NULL THEN NULL ELSE r.share_num || '/' || r.share_den END,
+                                              'partyName', pa.name, 'partyType', pa.party_type, 'interestStatus', r.interest_status, 'ended', r.valid_to IS NOT NULL))
+                        FROM lais.rrr r JOIN lais.party pa ON pa.id = r.party_id
+                       WHERE r.parcel_id = p.id AND (r.valid_to IS NULL OR r.ended_by_case = $1)), '[]'::json) AS current_rights
+       FROM lais.case_source_parcel s
+       JOIN lais.parcel p ON p.id = s.parcel_id
+       JOIN lais.parcel_version v ON v.id = p.current_version_id
+      WHERE s.case_id = $1 ORDER BY p.upi`,
+    [cs.id],
+  );
+  const { rows: children } = await pool.query(
+    `SELECT DISTINCT p.upi, p.status FROM lais.parcel_lineage l JOIN lais.parcel p ON p.id = l.child_parcel_id
+      WHERE l.case_id = $1 ORDER BY p.upi`,
+    [cs.id],
+  );
+
   const allowedActions = CASE_ACTIONS.filter((a) => authorize(principal, a, ctx).allowed);
   const canRead = (classification: string) =>
     classification === 'public' ||
@@ -219,6 +281,8 @@ casesRouter.get('/:id', async (req, res) => {
     })),
     staged: staged.rows[0] ?? null,
     parcel: parcel.rows[0] ?? null,
+    sources,
+    children,
     decisions: decisions.rows,
     validation,
     allowedActions,
@@ -242,6 +306,9 @@ casesRouter.patch('/:id', async (req, res) => {
   await inCaseTx(req, 'case.edit_attributes', async (client, cs) => {
     if (cs.case_type === 'transfer' && (body.landCategory !== undefined || body.landUse !== undefined || body.proposedUpi !== undefined)) {
       throw badRequest('A transfer does not change the parcel category, land use or identifier');
+    }
+    if (cs.case_type !== 'first_registration' && body.proposedUpi) {
+      throw badRequest('New parcels from a subdivision or consolidation receive identifiers at publication');
     }
     const next = {
       land_category: body.landCategory !== undefined ? body.landCategory : cs.land_category,
@@ -267,44 +334,52 @@ casesRouter.post('/:id/geometry', geojsonUpload.single('file'), async (req, res)
   }
 
   const result = await inCaseTx(req, 'case.import_geometry', async (client, cs) => {
-    const { geometry, properties } = extractSingleFeature(req.file!.buffer.toString('utf8'), srid);
-
-    let structural;
-    try {
-      ({ rows: [structural] } = await client.query(
-        `WITH g AS (SELECT ST_Force2D(ST_SetSRID(ST_GeomFromGeoJSON($1), $2)) AS gi)
-         SELECT gi, GeometryType(gi) AS gtype, ST_IsEmpty(gi) AS empty, ST_IsValid(gi) AS valid, ST_IsValidReason(gi) AS reason,
-                ST_XMin(gi) AS xmin, ST_XMax(gi) AS xmax, ST_YMin(gi) AS ymin, ST_YMax(gi) AS ymax FROM g`,
-        [JSON.stringify(geometry), srid],
-      ));
-    } catch {
-      throw badRequest('The geometry could not be read as GeoJSON');
-    }
-    let problem: string | null = null;
-    if (!['POLYGON', 'MULTIPOLYGON'].includes(structural.gtype)) problem = `Expected a Polygon or MultiPolygon, got ${structural.gtype}`;
-    else if (structural.empty) problem = 'The geometry is empty';
-    else if (!structural.valid) problem = structural.reason;
-    else if (srid === 4326 && (structural.xmin < -180 || structural.xmax > 180 || structural.ymin < -90 || structural.ymax > 90)) {
-      problem = 'Coordinates are outside the valid longitude/latitude range for EPSG:4326; check the declared CRS';
-    }
+    const features = extractFeatures(req.file!.buffer.toString('utf8'), srid, FEATURE_LIMITS[cs.case_type]);
 
     await client.query(`UPDATE staging.batch SET status = 'superseded' WHERE case_id = $1 AND status = 'active'`, [cs.id]);
     const { rows: [batch] } = await client.query(
       `INSERT INTO staging.batch (case_id, uploaded_by, source_filename, file_sha256, declared_srid, feature_count, status)
-       VALUES ($1, $2, $3, $4, $5, 1, 'active') RETURNING id`,
-      [cs.id, req.auth!.user.id, req.file!.originalname.slice(0, 200), createHash('sha256').update(req.file!.buffer).digest('hex'), srid],
+       VALUES ($1, $2, $3, $4, $5, $6, 'active') RETURNING id`,
+      [cs.id, req.auth!.user.id, req.file!.originalname.slice(0, 200), createHash('sha256').update(req.file!.buffer).digest('hex'), srid, features.length],
     );
-    await client.query(
-      `INSERT INTO staging.feature (batch_id, feature_index, geom_input, geom, structural_ok, structural_message, properties)
-       VALUES ($1, 0, $2::geometry, CASE WHEN $3 THEN ST_Multi(ST_Transform($2::geometry, 4326)) END, $3, $4, $5)`,
-      [batch.id, structural.gi, problem === null, problem, JSON.stringify(properties)],
-    );
-    await recordEvent(client, cs.id, req.auth!.user.id, 'import_geometry', `${req.file!.originalname} (EPSG:${srid})`);
+
+    const problems: (string | null)[] = [];
+    for (const [index, { geometry, properties }] of features.entries()) {
+      const label = features.length > 1 ? `Feature ${index + 1}: ` : '';
+      let structural;
+      try {
+        ({ rows: [structural] } = await client.query(
+          `WITH g AS (SELECT ST_Force2D(ST_SetSRID(ST_GeomFromGeoJSON($1), $2)) AS gi)
+           SELECT gi, GeometryType(gi) AS gtype, ST_IsEmpty(gi) AS empty, ST_IsValid(gi) AS valid, ST_IsValidReason(gi) AS reason,
+                  ST_XMin(gi) AS xmin, ST_XMax(gi) AS xmax, ST_YMin(gi) AS ymin, ST_YMax(gi) AS ymax FROM g`,
+          [JSON.stringify(geometry), srid],
+        ));
+      } catch {
+        throw badRequest(`${label}The geometry could not be read as GeoJSON`);
+      }
+      let problem: string | null = null;
+      if (!['POLYGON', 'MULTIPOLYGON'].includes(structural.gtype)) problem = `Expected a Polygon or MultiPolygon, got ${structural.gtype}`;
+      else if (structural.empty) problem = 'The geometry is empty';
+      else if (!structural.valid) problem = structural.reason;
+      else if (srid === 4326 && (structural.xmin < -180 || structural.xmax > 180 || structural.ymin < -90 || structural.ymax > 90)) {
+        problem = 'Coordinates are outside the valid longitude/latitude range for EPSG:4326; check the declared CRS';
+      }
+      problems.push(problem && `${label}${problem}`);
+
+      await client.query(
+        `INSERT INTO staging.feature (batch_id, feature_index, geom_input, geom, structural_ok, structural_message, properties)
+         VALUES ($1, $2, $3::geometry, CASE WHEN $4 THEN ST_Multi(ST_Transform($3::geometry, 4326)) END, $4, $5, $6)`,
+        [batch.id, index, structural.gi, problem === null, problem, JSON.stringify(properties)],
+      );
+    }
+
+    const invalid = problems.filter((p): p is string => p !== null);
+    await recordEvent(client, cs.id, req.auth!.user.id, 'import_geometry', `${req.file!.originalname} (EPSG:${srid}, ${features.length} feature(s))`);
     await writeAudit(req, {
-      action: 'staging.import', outcome: problem ? 'failure' : 'success', entityType: 'staging_batch', entityId: batch.id, caseId: cs.id, countyId: cs.county_id,
-      detail: { srid, filename: req.file!.originalname, structuralProblem: problem },
+      action: 'staging.import', outcome: invalid.length ? 'failure' : 'success', entityType: 'staging_batch', entityId: batch.id, caseId: cs.id, countyId: cs.county_id,
+      detail: { srid, filename: req.file!.originalname, featureCount: features.length, structuralProblems: invalid },
     }, client);
-    return { batchId: batch.id, structuralOk: problem === null, problem };
+    return { batchId: batch.id, featureCount: features.length, structuralOk: invalid.length === 0, problem: invalid.join('; ') || null };
   });
   res.status(201).json(result);
 });
@@ -314,24 +389,56 @@ const rightBody = z.object({
   rrrType: z.enum(RRR_TYPES),
   shareNum: z.number().int().positive().optional(),
   shareDen: z.number().int().positive().optional(),
+  /** Subdivision only: which new parcel (0-based, in import order) the interest applies to. */
+  featureIndex: z.number().int().min(0).max(49).optional(),
 }).refine((b) => (b.shareNum === undefined) === (b.shareDen === undefined), 'Give both share numerator and denominator, or neither')
   .refine((b) => b.shareNum === undefined || b.shareNum <= b.shareDen!, 'A share cannot exceed the whole');
 
 casesRouter.post('/:id/rights', async (req, res) => {
   const body = rightBody.parse(req.body);
   const created = await inCaseTx(req, 'case.edit_rights', async (client, cs) => {
+    if (cs.case_type === 'subdivision' && body.featureIndex === undefined) throw badRequest('Choose which new parcel this interest applies to');
+    if (cs.case_type !== 'subdivision' && body.featureIndex !== undefined) throw badRequest('This case creates or changes a single parcel');
     const { rows: [party] } = await client.query('SELECT id, name FROM lais.party WHERE id = $1', [body.partyId]);
     if (!party) throw badRequest('Unknown party');
     const { rows: [row] } = await client.query(
-      `INSERT INTO lais.case_right_proposal (case_id, party_id, rrr_type, share_num, share_den, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [cs.id, body.partyId, body.rrrType, body.shareNum ?? null, body.shareDen ?? null, req.auth!.user.id],
+      `INSERT INTO lais.case_right_proposal (case_id, party_id, rrr_type, share_num, share_den, feature_index, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [cs.id, body.partyId, body.rrrType, body.shareNum ?? null, body.shareDen ?? null, body.featureIndex ?? null, req.auth!.user.id],
     );
-    await recordEvent(client, cs.id, req.auth!.user.id, 'propose_right', `${body.rrrType} for ${party.name}`);
-    await writeAudit(req, { action: 'case.propose_right', outcome: 'success', entityType: 'case', entityId: cs.id, caseId: cs.id, countyId: cs.county_id, detail: { partyId: body.partyId, rrrType: body.rrrType } }, client);
+    const target = body.featureIndex === undefined ? '' : ` on new parcel ${body.featureIndex + 1}`;
+    await recordEvent(client, cs.id, req.auth!.user.id, 'propose_right', `${body.rrrType} for ${party.name}${target}`);
+    await writeAudit(req, { action: 'case.propose_right', outcome: 'success', entityType: 'case', entityId: cs.id, caseId: cs.id, countyId: cs.county_id, detail: { partyId: body.partyId, rrrType: body.rrrType, featureIndex: body.featureIndex ?? null } }, client);
     return row;
   });
   res.status(201).json(created);
+});
+
+/**
+ * Subdivision convenience: proposes the parent's current ownership-type interests on every new parcel.
+ * Encumbrances are not copied; whether a mortgage or lease continues on each part needs its own evidence.
+ */
+casesRouter.post('/:id/rights/copy-from-source', async (req, res) => {
+  const result = await inCaseTx(req, 'case.edit_rights', async (client, cs) => {
+    if (cs.case_type !== 'subdivision') throw badRequest('Only a subdivision copies interests from its source parcel');
+    const { rows: [batch] } = await client.query(`SELECT feature_count FROM staging.batch WHERE case_id = $1 AND status = 'active'`, [cs.id]);
+    if (!batch) throw conflict('Import the new parcel geometries first');
+    const existing = await client.query('SELECT 1 FROM lais.case_right_proposal WHERE case_id = $1 LIMIT 1', [cs.id]);
+    if (existing.rows[0]) throw conflict('Remove the interests already proposed before copying from the source parcel');
+    const { rowCount } = await client.query(
+      `INSERT INTO lais.case_right_proposal (case_id, party_id, rrr_type, share_num, share_den, feature_index, created_by)
+       SELECT $1, r.party_id, r.rrr_type, r.share_num, r.share_den, i, $3
+         FROM lais.case_source_parcel s
+         JOIN lais.rrr r ON r.parcel_id = s.parcel_id AND r.valid_to IS NULL AND r.rrr_type = ANY($4)
+         CROSS JOIN generate_series(0, $2 - 1) AS i
+        WHERE s.case_id = $1`,
+      [cs.id, batch.feature_count, req.auth!.user.id, OWNERSHIP_TYPES],
+    );
+    await recordEvent(client, cs.id, req.auth!.user.id, 'propose_right', `Copied source ownership to ${batch.feature_count} new parcels`);
+    await writeAudit(req, { action: 'case.propose_right', outcome: 'success', entityType: 'case', entityId: cs.id, caseId: cs.id, countyId: cs.county_id, detail: { copiedFromSource: true, rows: rowCount } }, client);
+    return { created: rowCount };
+  });
+  res.status(201).json(result);
 });
 
 casesRouter.delete('/:id/rights/:rightId', async (req, res) => {

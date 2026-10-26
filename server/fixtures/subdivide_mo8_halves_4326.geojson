@@ -1,0 +1,74 @@
+{
+ "type": "FeatureCollection",
+ "name": "SYNTHETIC: PROV-MO-000008 split into west and east halves",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "part": 1,
+    "note": "SYNTHETIC"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.7964,
+       6.3012
+      ],
+      [
+       -10.7959,
+       6.3012
+      ],
+      [
+       -10.7959,
+       6.3022
+      ],
+      [
+       -10.7964,
+       6.3022
+      ],
+      [
+       -10.7964,
+       6.3012
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "part": 2,
+    "note": "SYNTHETIC"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.7959,
+       6.3012
+      ],
+      [
+       -10.7954,
+       6.3012
+      ],
+      [
+       -10.7954,
+       6.3022
+      ],
+      [
+       -10.7959,
+       6.3022
+      ],
+      [
+       -10.7959,
+       6.3012
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

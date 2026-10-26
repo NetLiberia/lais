@@ -16,22 +16,22 @@ export async function computeSnapshot(db: Db, cs: CaseRow): Promise<string> {
     [cs.id],
   );
   const rights = await db.query(
-    `SELECT id, party_id, rrr_type, share_num, share_den FROM lais.case_right_proposal WHERE case_id = $1 ORDER BY id`,
+    `SELECT id, party_id, rrr_type, share_num, share_den, feature_index FROM lais.case_right_proposal WHERE case_id = $1 ORDER BY id`,
     [cs.id],
   );
   const documents = await db.query(
     `SELECT id, doc_type, classification, sha256, verification_status FROM lais.document WHERE case_id = $1 ORDER BY id`,
     [cs.id],
   );
-  let parcelState: unknown = null;
-  if (cs.parcel_id) {
-    const parcel = await db.query('SELECT current_version_id, status FROM lais.parcel WHERE id = $1', [cs.parcel_id]);
-    const current = await db.query(
-      'SELECT id FROM lais.rrr WHERE parcel_id = $1 AND valid_to IS NULL ORDER BY id',
-      [cs.parcel_id],
-    );
-    parcelState = { parcel: parcel.rows[0] ?? null, currentRights: current.rows.map((r) => r.id) };
-  }
+  // State of every existing parcel the case acts on: the transfer parcel or the parcels being replaced.
+  const { rows: parcelState } = await db.query(
+    `SELECT p.id, p.current_version_id, p.status,
+            array(SELECT r.id FROM lais.rrr r WHERE r.parcel_id = p.id AND r.valid_to IS NULL ORDER BY r.id) AS current_rights
+       FROM lais.parcel p
+      WHERE p.id = $2 OR p.id IN (SELECT parcel_id FROM lais.case_source_parcel WHERE case_id = $1)
+      ORDER BY p.id`,
+    [cs.id, cs.case_type === 'transfer' ? cs.parcel_id : null],
+  );
 
   const material = {
     case: {

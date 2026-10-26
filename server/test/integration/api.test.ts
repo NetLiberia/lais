@@ -97,6 +97,15 @@ async function approve(id: string) {
   return as('reg.mo').post(`/api/cases/${id}/decision`, { decision: 'approved', reason: 'Evidence reviewed and consistent', authorityBasis: 'Synthetic delegation ref TEST-001' });
 }
 
+/** Registrar acknowledges every warning on the latest validation run. */
+async function acknowledgeAll(id: string) {
+  for (const f of (await caseDetail(id)).validation.findings) {
+    if (f.severity === 'warning') {
+      expect((await as('reg.mo').post(`/api/cases/${id}/findings/${f.id}/acknowledge`, { note: 'Reviewed for this test' })).status).toBe(200);
+    }
+  }
+}
+
 describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
   beforeAll(async () => {
     process.env.DATABASE_URL = TEST_DB;
@@ -373,12 +382,135 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
       const b = await prepareTransfer('PROV-MO-000009', 'Joseph');
       for (const id of [a, b]) {
         await as('proc.mo').post(`/api/cases/${id}/submit`);
+        await acknowledgeAll(id); // each case is warned that the other acts on the same parcel
         expect((await approve(id)).status).toBe(200);
       }
       expect((await as('reg.mo').post(`/api/cases/${a}/publish`)).status).toBe(200);
       const second = await as('reg.mo').post(`/api/cases/${b}/publish`);
       expect(second.status).toBe(409);
       expect((await caseDetail(b)).case.status).toBe('under_review');
+    });
+  });
+
+  describe('subdivision and consolidation', () => {
+    const codes = (r: { findings: { code: string }[] }) => r.findings.map((f) => f.code);
+
+    async function addVerifiedSurveyPlan(id: string) {
+      const plan = await as('gis.mo').upload(`/api/cases/${id}/documents`, fixture('synthetic_document.pdf'), 'plan.pdf', { docType: 'survey_plan', classification: 'restricted' });
+      expect(plan.status).toBe(201);
+      expect((await as('proc.mo').post(`/api/cases/${id}/documents/${plan.body.id}/verify`, { status: 'verified', note: 'Survey plan checked' })).status).toBe(200);
+    }
+
+    it('rejects a split that leaves a gap, and one whose parts overlap', async () => {
+      const created = await as('gis.mo').post('/api/cases', { caseType: 'subdivision', parcelUpi: 'PROV-MO-000008', sourceReference: 'SYNTHETIC-SUBDIVISION' });
+      expect(created.status).toBe(201);
+      const id = created.body.id;
+
+      await as('gis.mo').upload(`/api/cases/${id}/geometry`, fixture('subdivide_mo8_gap_4326.geojson'), 'gap.geojson', { crs: '4326' });
+      let result = await submit(id);
+      expect(result.status).toBe('returned');
+      expect(codes(result)).toContain('COVERAGE_GAP');
+
+      await as('gis.mo').upload(`/api/cases/${id}/geometry`, fixture('subdivide_mo8_overlap_4326.geojson'), 'overlap.geojson', { crs: '4326' });
+      result = await submit(id);
+      expect(result.status).toBe('returned');
+      expect(codes(result)).toContain('NEW_PARCELS_OVERLAP');
+      expect(codes(result)).not.toContain('COVERAGE_GAP');
+
+      expect((await as('gis.mo').post(`/api/cases/${id}/withdraw`, { reason: 'Superseded by a corrected survey' })).status).toBe(200);
+    });
+
+    it('requires at least two new parcels', async () => {
+      const created = await as('gis.mo').post('/api/cases', { caseType: 'subdivision', parcelUpi: 'PROV-MO-000008' });
+      const res = await as('gis.mo').upload(`/api/cases/${created.body.id}/geometry`, fixture('consolidate_mo8_halves_4326.geojson'), 'one.geojson', { crs: '4326' });
+      expect(res.status).toBe(400);
+      await as('gis.mo').post(`/api/cases/${created.body.id}/withdraw`, { reason: 'Test case not needed' });
+    });
+
+    let children: string[] = [];
+
+    it('subdivides a parcel: retires it, creates the parts and records lineage', async () => {
+      const created = await as('gis.mo').post('/api/cases', { caseType: 'subdivision', parcelUpi: 'PROV-MO-000008', sourceReference: 'SYNTHETIC-SUBDIVISION' });
+      const id = created.body.id;
+      expect((await as('gis.mo').upload(`/api/cases/${id}/geometry`, fixture('subdivide_mo8_halves_4326.geojson'), 'halves.geojson', { crs: '4326' })).status).toBe(201);
+      await addVerifiedSurveyPlan(id);
+
+      // Rights must name a target parcel; the copy helper proposes the parent's ownership on each part.
+      expect((await as('proc.mo').post(`/api/cases/${id}/rights`, { partyId: await partyId('Hawa'), rrrType: 'ownership' })).status).toBe(400);
+      const copied = await as('proc.mo').post(`/api/cases/${id}/rights/copy-from-source`);
+      expect(copied.status).toBe(201);
+      expect(copied.body.created).toBe(2);
+
+      const result = await submit(id);
+      expect(result.findings.filter((f) => f.severity === 'error')).toEqual([]);
+      expect(result.status).toBe('under_review');
+
+      await acknowledgeAll(id);
+      expect((await approve(id)).status).toBe(200);
+      const pub = await as('reg.mo').post(`/api/cases/${id}/publish`);
+      expect(pub.status).toBe(200);
+      children = pub.body.upi.split(', ');
+      expect(children).toHaveLength(2);
+
+      const parent = (await as('reg.mo').get('/api/parcels/PROV-MO-000008')).body;
+      expect(parent.parcel.status).toBe('retired');
+      expect(parent.currentRights).toEqual([]);
+      expect(parent.children.map((c: any) => c.upi)).toEqual(children);
+      expect(parent.versions[0].valid_to).not.toBeNull();
+
+      for (const upi of children) {
+        const child = (await as('reg.mo').get(`/api/parcels/${upi}`)).body;
+        expect(child.parents.map((p: any) => p.upi)).toEqual(['PROV-MO-000008']);
+        expect(child.currentRights.map((r: any) => r.party_name)).toEqual(['Sample Trading Company (synthetic)']);
+        expect(Number(child.versions[0].area_m2_calculated)).toBeGreaterThan(5000);
+      }
+
+      const old = await request(app).get('/api/public/parcels/PROV-MO-000008');
+      expect(old.status).toBe(404);
+      expect(old.body.error).toContain(children[0]);
+    });
+
+    it('refuses new cases on a retired parcel', async () => {
+      const res = await as('proc.mo').post('/api/cases', { caseType: 'transfer', parcelUpi: 'PROV-MO-000008' });
+      expect(res.status).toBe(409);
+    });
+
+    it('consolidates the parts back into one parcel', async () => {
+      const created = await as('proc.mo').post('/api/cases', { caseType: 'consolidation', parcelUpis: children, sourceReference: 'SYNTHETIC-CONSOLIDATION' });
+      expect(created.status).toBe(201);
+      const id = created.body.id;
+      expect((await as('gis.mo').upload(`/api/cases/${id}/geometry`, fixture('consolidate_mo8_halves_4326.geojson'), 'merged.geojson', { crs: '4326' })).status).toBe(201);
+      await addVerifiedSurveyPlan(id);
+      expect((await as('proc2.mo').post(`/api/cases/${id}/rights`, { partyId: (await as('proc.mo').get('/api/parties?q=Trading')).body[0].id, rrrType: 'ownership' })).status).toBe(201);
+
+      const result = await submit(id);
+      expect(result.findings.filter((f) => f.severity === 'error')).toEqual([]);
+      await acknowledgeAll(id);
+      expect((await approve(id)).status).toBe(200);
+      const pub = await as('reg.mo').post(`/api/cases/${id}/publish`);
+      expect(pub.status).toBe(200);
+      expect(pub.body.upi).toMatch(/^PROV-MO-\d{6}$/);
+
+      const merged = (await as('reg.mo').get(`/api/parcels/${pub.body.upi}`)).body;
+      expect(merged.parents.map((p: any) => p.upi).sort()).toEqual([...children].sort());
+      for (const upi of children) expect((await as('reg.mo').get(`/api/parcels/${upi}`)).body.parcel.status).toBe('retired');
+      // History stays intact: the retired parcels keep their closed versions and ended rights.
+      const { rows } = await pool.query(
+        `SELECT count(*)::int AS n FROM lais.rrr r JOIN lais.parcel p ON p.id = r.parcel_id WHERE p.upi = ANY($1) AND r.valid_to IS NOT NULL`,
+        [children],
+      );
+      expect(rows[0].n).toBe(2);
+    });
+
+    it('rejects a consolidation that does not match the merged parcels', async () => {
+      const created = await as('proc.mo').post('/api/cases', { caseType: 'consolidation', parcelUpis: ['PROV-MO-000011', 'PROV-MO-000012'] });
+      const id = created.body.id;
+      await as('gis.mo').upload(`/api/cases/${id}/geometry`, fixture('valid_parcel_4326.geojson'), 'wrong.geojson', { crs: '4326' });
+      const result = await submit(id);
+      expect(result.status).toBe('returned');
+      expect(codes(result)).toEqual(expect.arrayContaining(['COVERAGE_GAP', 'COVERAGE_EXCEEDS_SOURCE']));
+      // A lease on PROV-MO-000012 ends at retirement unless re-recorded, so the officer is warned.
+      expect(codes(result)).toContain('ENCUMBRANCE_PRESENT');
     });
   });
 

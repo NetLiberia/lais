@@ -10,8 +10,13 @@ export const CASE_STATUSES = [
 ] as const;
 export type CaseStatus = (typeof CASE_STATUSES)[number];
 
-export const CASE_TYPES = ['first_registration', 'transfer'] as const;
+export const CASE_TYPES = ['first_registration', 'transfer', 'subdivision', 'consolidation'] as const;
 export type CaseType = (typeof CASE_TYPES)[number];
+
+/** Case types that create new parcels from imported geometry. */
+export const SPATIAL_CASE_TYPES: readonly CaseType[] = ['first_registration', 'subdivision', 'consolidation'];
+/** Case types that retire existing parcels and create new ones. */
+export const RESHAPING_CASE_TYPES: readonly CaseType[] = ['subdivision', 'consolidation'];
 
 /**
  * Permitted status transitions. The database trigger lais.enforce_case_transition()

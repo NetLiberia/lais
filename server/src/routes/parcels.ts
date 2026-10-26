@@ -41,7 +41,10 @@ parcelsRouter.get('/:upi', async (req, res) => {
       [parcel.id],
     ),
     pool.query(
-      `SELECT id, case_no, case_type, status, created_at, updated_at FROM lais.land_case WHERE parcel_id = $1 ORDER BY created_at DESC`,
+      `SELECT id, case_no, case_type, status, created_at, updated_at FROM lais.land_case
+        WHERE parcel_id = $1 OR id IN (SELECT case_id FROM lais.case_source_parcel WHERE parcel_id = $1)
+           OR id IN (SELECT case_id FROM lais.parcel_lineage WHERE child_parcel_id = $1)
+        ORDER BY created_at DESC`,
       [parcel.id],
     ),
     pool.query(
@@ -51,10 +54,21 @@ parcelsRouter.get('/:upi', async (req, res) => {
       [parcel.id],
     ),
   ]);
+  const { rows: lineage } = await pool.query(
+    `SELECT 'parent' AS relation, p.upi, p.status, c.case_no FROM lais.parcel_lineage l
+       JOIN lais.parcel p ON p.id = l.parent_parcel_id JOIN lais.land_case c ON c.id = l.case_id WHERE l.child_parcel_id = $1
+     UNION ALL
+     SELECT 'child', p.upi, p.status, c.case_no FROM lais.parcel_lineage l
+       JOIN lais.parcel p ON p.id = l.child_parcel_id JOIN lais.land_case c ON c.id = l.case_id WHERE l.parent_parcel_id = $1
+     ORDER BY 1, 2`,
+    [parcel.id],
+  );
 
   await writeAudit(req, { action: 'parcel.view_internal', outcome: 'success', entityType: 'parcel', entityId: parcel.id, countyId: parcel.county_id });
   res.json({
     parcel: { ...parcel, county: county.rows[0] },
+    parents: lineage.filter((l) => l.relation === 'parent'),
+    children: lineage.filter((l) => l.relation === 'child'),
     versions: versions.rows,
     currentRights: rights.rows.filter((r) => r.valid_to === null),
     historicalRights: rights.rows.filter((r) => r.valid_to !== null),

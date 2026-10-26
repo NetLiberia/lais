@@ -20,6 +20,7 @@ Phase 3 prototype for the MSc project *Development and Evaluation of a Privacy-A
 | Decision snapshot: approval records a hash of exactly what was reviewed; publication refuses and reopens the case if anything changed | `services/snapshot.ts`, `services/publication.ts` |
 | Atomic publication (single transaction, serialised per county) with full rollback on failure | `services/publication.ts` |
 | Transfers end old interests and register new ones; history is immutable (triggers block edits and deletes) | `publication.ts`, `001_core.sql` |
+| Subdivision (one parcel into 2–50) and consolidation (2+ parcels into one): new parcels must not overlap each other and must cover the source area exactly; rights are recorded per new parcel; sources are retired, never deleted, and parent→child lineage is kept. Retired identifiers on the public portal point to their replacements | `services/validation.ts` (`reshapeChecks`), `services/publication.ts` (`publishReshape`), `004_reshaping.sql` |
 | Disputes: recorded by registrars, block transfers, closed with a recorded outcome | `routes/parcels.ts` |
 | Protected documents: content-type sniffing, private storage, SHA-256 integrity check on every read, classification-based access, all downloads audited | `routes/cases.ts`, `routes/documents.ts` |
 | Authentication: scrypt hashes, progressive lockout, server-side sessions (hash-only token storage), CSRF tokens, optional mandatory TOTP MFA for privileged roles | `server/src/auth/*`, `routes/auth.ts` |
@@ -92,8 +93,8 @@ If another app already uses port 4000 or 5173, set `PORT=4100` in `server/.env` 
 npm test
 ```
 
-- **35 unit tests**: permission matrix, cross-county denial, separation of duties, workflow (including a check that the TypeScript transition table matches the SQL trigger), TOTP RFC test vectors, password hashing, GeoJSON/CRS intake, fractional shares, file sniffing.
-- **34 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration and transfer lifecycles, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, and admin limits.
+- **36 unit tests**: permission matrix, cross-county denial, separation of duties, workflow (including a check that the TypeScript transition table matches the SQL trigger), TOTP RFC test vectors, password hashing, GeoJSON/CRS intake, fractional shares, file sniffing.
+- **40 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration, transfer, subdivision and consolidation lifecycles, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, and admin limits.
 
 ## Demo accounts (synthetic)
 
@@ -122,11 +123,14 @@ All use `SEED_PASSWORD`.
 
 Other fixtures: `adjacent_touching` (expected: no conflict), `duplicate_of_mo5`, `crosses_county`, `swapped_axes`, `self_intersecting`, `valid_parcel_4326`, and `valid_parcel_utm29n` (import with EPSG:32629). PROV-MO-000007 is seeded as disputed, so transfers of it are blocked.
 
+**Subdivision:** as gis.mo, open a *Subdivision* of PROV-MO-000008 and import `subdivide_mo8_halves_4326.geojson`. Then, as proc.mo, use *Copy current ownership to each new parcel*. `subdivide_mo8_gap_4326` and `subdivide_mo8_overlap_4326` show the coverage and overlap errors. After publishing, `consolidate_mo8_halves_4326` merges the two halves back together.
+
 ## Known limits of this prototype
 
-- One parcel per registration case. Multi-parcel batch import, subdivision and consolidation are later phases; the schema (versions, staging batches) is designed for them.
+- One parcel per registration case; multi-parcel batch import of new registrations is a later phase. Subdivision accepts up to 50 new parcels per case.
+- Subdivision and consolidation give every resulting parcel the same land category and use, set on the case.
 - No malware scanning of uploads (the hook point is marked in `routes/cases.ts`), no e-mail or SMS notifications, no document-request workflow for landowners.
-- Conflict tolerances (`OVERLAP_TOLERANCE_M2`, `DUPLICATE_HAUSDORFF_M`, `MIN_PARCEL_AREA_M2`) and the public field list (`PUBLIC_PARCEL_FIELDS`) are placeholders until the cadastral authority and the disclosure policy define them.
+- Conflict tolerances (`OVERLAP_TOLERANCE_M2`, `DUPLICATE_HAUSDORFF_M`, `MIN_PARCEL_AREA_M2`, `COVERAGE_TOLERANCE_M2`) and the public field list (`PUBLIC_PARCEL_FIELDS`) are placeholders until the cadastral authority and the disclosure policy define them.
 - The audit chain resists tampering by application users, but a database superuser can still alter it. For higher assurance, run `server/db/roles.sql` so the app uses a least-privilege role, and ship events to a separate log store.
 - Map tiles come from OpenStreetMap's public servers, so the browser fetches them from the internet.
 - Not security-audited, load-tested or usability-tested; those are Phase 7 evaluation activities. HTTPS, backups and secret management belong to the deployment environment.

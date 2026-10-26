@@ -1,0 +1,40 @@
+{
+ "type": "FeatureCollection",
+ "name": "SYNTHETIC: the two halves of PROV-MO-000008 merged back into one parcel",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "part": 1,
+    "note": "SYNTHETIC"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.7964,
+       6.3012
+      ],
+      [
+       -10.7954,
+       6.3012
+      ],
+      [
+       -10.7954,
+       6.3022
+      ],
+      [
+       -10.7964,
+       6.3022
+      ],
+      [
+       -10.7964,
+       6.3012
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

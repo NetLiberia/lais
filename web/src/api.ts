@@ -80,6 +80,8 @@ export const STATUS_LABELS: Record<string, string> = {
 export const CASE_TYPE_LABELS: Record<string, string> = {
   first_registration: 'First registration',
   transfer: 'Transfer',
+  subdivision: 'Subdivision',
+  consolidation: 'Consolidation',
 };
 
 export const human = (s: string | null | undefined) => (s ? s.replace(/_/g, ' ') : '—');

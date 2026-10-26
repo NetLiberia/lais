@@ -4,6 +4,18 @@ import { api } from '../api';
 import { useAuth } from '../auth';
 import { ErrorBox, useAction } from '../components/ui';
 
+type CaseType = 'first_registration' | 'transfer' | 'subdivision' | 'consolidation';
+
+const TYPES: { value: CaseType; label: string; hint: string }[] = [
+  { value: 'first_registration', label: 'First registration', hint: 'Record a parcel that is not yet in the register.' },
+  { value: 'transfer', label: 'Transfer', hint: 'Change who holds the interest in a published parcel. The boundary is unchanged.' },
+  { value: 'subdivision', label: 'Subdivision', hint: 'Split one published parcel into two or more new parcels.' },
+  { value: 'consolidation', label: 'Consolidation', hint: 'Merge two or more published parcels into one.' },
+];
+
+/** Splits a list of identifiers typed with commas, spaces or new lines. */
+const parseUpis = (text: string) => text.split(/[\s,;]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
+
 export function NewCase() {
   const { session } = useAuth();
   const navigate = useNavigate();
@@ -12,20 +24,25 @@ export function NewCase() {
     .map((g) => g.county!);
   const uniqueCounties = [...new Map(counties.map((c) => [c.id, c])).values()];
 
-  const [caseType, setCaseType] = useState<'first_registration' | 'transfer'>('first_registration');
+  const [caseType, setCaseType] = useState<CaseType>('first_registration');
   const [countyId, setCountyId] = useState<number>(uniqueCounties[0]?.id ?? 0);
   const [landCategory, setLandCategory] = useState('private');
   const [landUse, setLandUse] = useState('');
   const [sourceReference, setSourceReference] = useState('');
   const [proposedUpi, setProposedUpi] = useState('');
   const [parcelUpi, setParcelUpi] = useState('');
+  const [parcelUpis, setParcelUpis] = useState('');
   const { busy, error, run } = useAction();
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    const body = caseType === 'transfer'
-      ? { caseType, parcelUpi: parcelUpi.trim(), sourceReference: sourceReference || undefined }
-      : { caseType, countyId, landCategory, landUse: landUse || undefined, sourceReference: sourceReference || undefined, proposedUpi: proposedUpi.trim() || undefined };
+    const reference = sourceReference || undefined;
+    const body =
+      caseType === 'first_registration'
+        ? { caseType, countyId, landCategory, landUse: landUse || undefined, sourceReference: reference, proposedUpi: proposedUpi.trim() || undefined }
+        : caseType === 'consolidation'
+          ? { caseType, parcelUpis: parseUpis(parcelUpis), sourceReference: reference }
+          : { caseType, parcelUpi: parcelUpi.trim(), sourceReference: reference };
     let id = '';
     if (await run(async () => { id = (await api<{ id: string }>('/cases', { body })).id; })) navigate(`/work/cases/${id}`);
   };
@@ -34,13 +51,17 @@ export function NewCase() {
     <div className="narrow">
       <h1>Open a case</h1>
       <form onSubmit={onSubmit} className="stack">
-        <fieldset className="row">
+        <fieldset className="stack compact-fieldset">
           <legend>Case type</legend>
-          <label className="inline"><input type="radio" checked={caseType === 'first_registration'} onChange={() => setCaseType('first_registration')} /> First registration of a parcel</label>
-          <label className="inline"><input type="radio" checked={caseType === 'transfer'} onChange={() => setCaseType('transfer')} /> Transfer of an existing parcel</label>
+          {TYPES.map((t) => (
+            <label key={t.value} className="inline">
+              <input type="radio" name="caseType" checked={caseType === t.value} onChange={() => setCaseType(t.value)} />
+              <span><strong>{t.label}</strong> <span className="muted small">{t.hint}</span></span>
+            </label>
+          ))}
         </fieldset>
 
-        {caseType === 'first_registration' ? (
+        {caseType === 'first_registration' && (
           <>
             <label>County (your assigned jurisdictions)
               <select value={countyId} onChange={(e) => setCountyId(Number(e.target.value))}>
@@ -60,8 +81,17 @@ export function NewCase() {
               <input value={proposedUpi} onChange={(e) => setProposedUpi(e.target.value.toUpperCase())} placeholder="PROV-MO-000123" />
             </label>
           </>
-        ) : (
+        )}
+        {(caseType === 'transfer' || caseType === 'subdivision') && (
           <label>Published parcel identifier<input value={parcelUpi} onChange={(e) => setParcelUpi(e.target.value.toUpperCase())} placeholder="PROV-MO-000001" required /></label>
+        )}
+        {caseType === 'consolidation' && (
+          <label>Parcels to merge (two or more identifiers, separated by commas or new lines)
+            <textarea value={parcelUpis} onChange={(e) => setParcelUpis(e.target.value)} placeholder={'PROV-MO-000011\nPROV-MO-000012'} required />
+          </label>
+        )}
+        {(caseType === 'subdivision' || caseType === 'consolidation') && (
+          <p className="small muted">The new parcel(s) start with the land category and use of the source; you can change them before submitting. New identifiers are assigned at publication.</p>
         )}
         <label>Survey / source record reference<input value={sourceReference} onChange={(e) => setSourceReference(e.target.value)} /></label>
         <ErrorBox error={error} />

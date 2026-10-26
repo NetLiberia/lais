@@ -22,19 +22,27 @@ export function CaseDetail() {
     await reload();
   };
 
+  const features: any[] = data.staged?.features ?? [];
+  const many = features.length > 1;
   const overlays: Overlay[] = [];
-  if (data.staged?.geometry) {
+  for (const s of data.sources) {
+    overlays.push({ id: `src-${s.upi}`, data: s.geometry, color: '#1f5fbf', dashed: true, label: `Being replaced: ${s.upi}` });
+  }
+  for (const f of features) {
     overlays.push({
-      id: 'staged',
-      data: data.staged.geometry,
-      color: data.staged.structural_ok ? '#e07b00' : '#b00020',
-      dashed: !data.staged.structural_ok,
-      label: data.staged.structural_ok ? 'Proposed geometry (staging)' : 'Invalid proposed geometry',
+      id: `staged-${f.index}`,
+      data: f.geometry,
+      color: f.structural_ok ? '#e07b00' : '#b00020',
+      dashed: !f.structural_ok,
+      label: `${many ? `New parcel ${f.index + 1}` : 'Proposed geometry'}${f.structural_ok ? ' (staging)' : ' (invalid)'}`,
     });
   }
   if (data.parcel?.geometry && cs.case_type === 'transfer') {
     overlays.push({ id: 'parcel', data: data.parcel.geometry, color: '#1f5fbf', label: `Published ${data.parcel.upi}` });
   }
+  const resultLinks = data.children.length > 0 && (
+    <> · created {data.children.map((c: any, i: number) => <span key={c.upi}>{i > 0 && ', '}<Link to={`/work/parcels/${c.upi}`}>{c.upi}</Link></span>)}</>
+  );
 
   return (
     <div className="page">
@@ -43,7 +51,9 @@ export function CaseDetail() {
           <h1>{cs.case_no} <StatusPill status={cs.status} /></h1>
           <p className="muted">
             {CASE_TYPE_LABELS[cs.case_type]} · {cs.county.name}
-            {data.parcel && <> · parcel <Link to={`/work/parcels/${data.parcel.upi}`}>{data.parcel.upi}</Link></>}
+            {data.parcel && cs.case_type !== 'consolidation' && <> · parcel <Link to={`/work/parcels/${data.parcel.upi}`}>{data.parcel.upi}</Link></>}
+            {data.sources.length > 0 && <> · replaces {data.sources.map((s: any, i: number) => <span key={s.upi}>{i > 0 && ', '}<Link to={`/work/parcels/${s.upi}`}>{s.upi}</Link></span>)}</>}
+            {resultLinks}
           </p>
         </div>
       </div>
@@ -53,8 +63,11 @@ export function CaseDetail() {
       <div className="grid-2">
         <div className="stack">
           <Attributes data={data} editable={can('case.edit_attributes')} onSave={(body) => act(() => api(`/cases/${id}`, { method: 'PATCH', body }))} />
-          {cs.case_type === 'transfer' && data.parcel && <CurrentRights parcel={data.parcel} />}
-          <Rights data={data} editable={can('case.edit_rights')} act={act} caseId={id!} />
+          {cs.case_type === 'transfer' && data.parcel && <CurrentRights parcel={data.parcel} note="On publication, ownership-type interests end and the incoming interests below are registered. Encumbrances carry forward." />}
+          {data.sources.map((s: any) => (
+            <CurrentRights key={s.upi} parcel={s} note="When this case is published the parcel is retired: all its current interests end, including encumbrances. Record on the new parcel(s) every interest that continues." />
+          ))}
+          <Rights data={data} editable={can('case.edit_rights')} act={act} caseId={id!} featureCount={features.length} />
           <Documents data={data} canUpload={can('case.upload_document')} act={act} caseId={id!} />
         </div>
         <div className="stack">
@@ -62,12 +75,23 @@ export function CaseDetail() {
             {cs.case_type === 'transfer'
               ? <p className="small muted">A transfer changes rights only; the published boundary is unchanged.</p>
               : data.staged
-                ? <p className="small">
-                    Imported {data.staged.source_filename} (declared EPSG:{data.staged.declared_srid}) by {data.staged.uploaded_by}, {fmtDate(data.staged.created_at)}.
-                    {data.staged.area_m2 && <> Calculated area {Number(data.staged.area_m2).toLocaleString()} m².</>}
-                    {!data.staged.structural_ok && <strong className="danger"> Invalid: {data.staged.structural_message}</strong>}
-                  </p>
-                : <p className="small muted">No geometry imported yet.</p>}
+                ? <div className="small">
+                    <p>Imported {data.staged.source_filename} (declared EPSG:{data.staged.declared_srid}) by {data.staged.uploaded_by}, {fmtDate(data.staged.created_at)}.</p>
+                    <ul className="plain">
+                      {features.map((f) => (
+                        <li key={f.index}>
+                          {many && <strong>New parcel {f.index + 1}: </strong>}
+                          {f.area_m2 && <>calculated area {Number(f.area_m2).toLocaleString()} m²</>}
+                          {!f.structural_ok && <strong className="danger"> invalid: {f.structural_message}</strong>}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                : <p className="small muted">
+                    {cs.case_type === 'subdivision' ? 'Import one GeoJSON file containing every new parcel (2 or more features).'
+                      : cs.case_type === 'consolidation' ? 'Import the merged parcel as a single feature.'
+                      : 'No geometry imported yet.'}
+                  </p>}
             <ParcelMap overlays={overlays} height={340} />
             {can('case.import_geometry') && <GeometryImport caseId={id!} act={act} />}
           </Section>
@@ -113,17 +137,20 @@ function Attributes({ data, editable, onSave }: { data: any; editable: boolean; 
     proposedUpi: cs.proposed_upi ?? '',
   });
   const registration = cs.case_type === 'first_registration';
+  const createsParcels = cs.case_type !== 'transfer';
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const body: Record<string, unknown> = { sourceReference: form.sourceReference || null };
-    if (registration) Object.assign(body, { landCategory: form.landCategory || null, landUse: form.landUse || null, proposedUpi: form.proposedUpi || null });
+    if (createsParcels) Object.assign(body, { landCategory: form.landCategory || null, landUse: form.landUse || null });
+    if (registration) Object.assign(body, { proposedUpi: form.proposedUpi || null });
     onSave(body);
   };
   if (!editable) {
     return (
       <Section title="Case details">
         <dl className="facts">
-          {registration && <><dt>Land category</dt><dd>{human(cs.land_category)}</dd><dt>Land use</dt><dd>{cs.land_use ?? '—'}</dd><dt>Proposed identifier</dt><dd>{cs.proposed_upi ?? 'assigned at publication'}</dd></>}
+          {createsParcels && <><dt>Land category</dt><dd>{human(cs.land_category)}</dd><dt>Land use</dt><dd>{cs.land_use ?? '—'}</dd></>}
+          {registration && <><dt>Proposed identifier</dt><dd>{cs.proposed_upi ?? 'assigned at publication'}</dd></>}
           <dt>Source reference</dt><dd>{cs.source_reference ?? '—'}</dd>
           <dt>Opened</dt><dd>{fmtDate(cs.created_at)}</dd>
         </dl>
@@ -133,17 +160,19 @@ function Attributes({ data, editable, onSave }: { data: any; editable: boolean; 
   return (
     <Section title="Case details">
       <form onSubmit={submit} className="stack">
-        {registration && (
+        {createsParcels && (
           <>
-            <label>Land category
+            <label>Land category{!registration && ' (of the new parcels)'}
               <select value={form.landCategory} onChange={(e) => setForm({ ...form, landCategory: e.target.value })}>
                 <option value="">—</option><option value="private">Private</option><option value="customary">Customary</option>
                 <option value="government">Government</option><option value="public">Public</option>
               </select>
             </label>
             <label>Land use<input value={form.landUse} onChange={(e) => setForm({ ...form, landUse: e.target.value })} /></label>
-            <label>Proposed identifier<input value={form.proposedUpi} placeholder="assigned at publication if blank" onChange={(e) => setForm({ ...form, proposedUpi: e.target.value.toUpperCase() })} /></label>
           </>
+        )}
+        {registration && (
+          <label>Proposed identifier<input value={form.proposedUpi} placeholder="assigned at publication if blank" onChange={(e) => setForm({ ...form, proposedUpi: e.target.value.toUpperCase() })} /></label>
         )}
         <label>Source reference<input value={form.sourceReference} onChange={(e) => setForm({ ...form, sourceReference: e.target.value })} /></label>
         <button type="submit">Save details</button>
@@ -152,15 +181,17 @@ function Attributes({ data, editable, onSave }: { data: any; editable: boolean; 
   );
 }
 
-function CurrentRights({ parcel }: { parcel: any }) {
+function CurrentRights({ parcel, note }: { parcel: any; note: string }) {
   return (
-    <Section title={`Current registered interests on ${parcel.upi}`}>
+    <Section title={`Interests on ${parcel.upi}${parcel.status === 'retired' ? ' (retired)' : ''}`}>
       <ul className="plain">
         {parcel.current_rights.map((r: any, i: number) => (
-          <li key={i}>{human(r.rrrType)}{r.share && ` ${r.share}`} — {r.partyName} <span className="muted">({r.partyType})</span></li>
+          <li key={i} className={r.ended ? 'muted' : ''}>
+            {human(r.rrrType)}{r.share && ` ${r.share}`} — {r.partyName} <span className="muted">({r.partyType})</span>{r.ended && ' — ended by this case'}
+          </li>
         ))}
       </ul>
-      <p className="small muted">On publication, ownership-type interests end and the incoming interests below are registered. Encumbrances carry forward.</p>
+      <p className="small muted">{note}</p>
     </Section>
   );
 }
@@ -191,26 +222,37 @@ function PartyPicker({ onPick }: { onPick: (p: { id: string; name: string }) => 
   );
 }
 
-function Rights({ data, editable, act, caseId }: { data: any; editable: boolean; act: (fn: () => Promise<unknown>) => Promise<void>; caseId: string }) {
+function Rights({ data, editable, act, caseId, featureCount }: { data: any; editable: boolean; act: (fn: () => Promise<unknown>) => Promise<void>; caseId: string; featureCount: number }) {
   const [party, setParty] = useState<{ id: string; name: string } | null>(null);
   const [rrrType, setRrrType] = useState('ownership');
   const [share, setShare] = useState('');
+  const [target, setTarget] = useState(0);
+  const subdivision = data.case.case_type === 'subdivision';
   const add = (e: FormEvent) => {
     e.preventDefault();
     const [num, den] = share.split('/').map((s) => Number(s.trim()));
     const body: Record<string, unknown> = { partyId: party!.id, rrrType };
     if (share) Object.assign(body, { shareNum: num, shareDen: den });
+    if (subdivision) body.featureIndex = target;
     void act(() => api(`/cases/${caseId}/rights`, { body })).then(() => { setParty(null); setShare(''); });
   };
-  const title = data.case.case_type === 'transfer' ? 'Incoming rights holders' : 'Proposed rights';
+  const title = data.case.case_type === 'transfer' ? 'Incoming rights holders' : subdivision ? 'Proposed rights on the new parcels' : 'Proposed rights';
   return (
-    <Section title={title}>
+    <Section
+      title={title}
+      actions={editable && subdivision && featureCount > 1 && data.rights.length === 0 && (
+        <button className="secondary" onClick={() => void act(() => api(`/cases/${caseId}/rights/copy-from-source`, { method: 'POST' }))}>
+          Copy current ownership to each new parcel
+        </button>
+      )}
+    >
       {data.rights.length === 0 ? <p className="muted">None recorded.</p> : (
         <table className="table">
-          <thead><tr><th>Party</th><th>Interest</th><th>Share</th><th>Identity</th>{editable && <th />}</tr></thead>
+          <thead><tr>{subdivision && <th>New parcel</th>}<th>Party</th><th>Interest</th><th>Share</th><th>Identity</th>{editable && <th />}</tr></thead>
           <tbody>
             {data.rights.map((r: any) => (
               <tr key={r.id}>
+                {subdivision && <td>{r.feature_index === null ? <span className="danger">unassigned</span> : r.feature_index + 1}</td>}
                 <td>{r.party_name} <span className="muted small">({r.party_type})</span></td>
                 <td>{human(r.rrr_type)}</td>
                 <td>{r.share_den ? `${r.share_num}/${r.share_den}` : '—'}</td>
@@ -222,11 +264,17 @@ function Rights({ data, editable, act, caseId }: { data: any; editable: boolean;
         </table>
       )}
       <p className="small muted">A proposed right is a claim under review. It becomes a registered interest only when an authorized registrar approves and publishes the case.</p>
-      {editable && (
+      {editable && subdivision && featureCount < 2 && <p className="small muted">Import the new parcel geometries first; interests are recorded per new parcel.</p>}
+      {editable && (!subdivision || featureCount > 1) && (
         party ? (
           <form onSubmit={add} className="row wrap">
             <strong>{party.name}</strong>
-            <select value={rrrType} onChange={(e) => setRrrType(e.target.value)}>
+            {subdivision && (
+              <select value={target} onChange={(e) => setTarget(Number(e.target.value))} aria-label="New parcel">
+                {Array.from({ length: featureCount }, (_, i) => <option key={i} value={i}>New parcel {i + 1}</option>)}
+              </select>
+            )}
+            <select value={rrrType} onChange={(e) => setRrrType(e.target.value)} aria-label="Interest">
               {RRR_TYPES.map((t) => <option key={t} value={t}>{human(t)}</option>)}
             </select>
             <input value={share} onChange={(e) => setShare(e.target.value)} placeholder="share e.g. 1/2 (co-ownership)" />

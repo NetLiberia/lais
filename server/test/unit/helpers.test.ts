@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { base32Decode, base32Encode, hotp, totp, verifyTotp } from '../../src/auth/totp.js';
 import { hashPassword, verifyPassword } from '../../src/auth/password.js';
 import { open, seal } from '../../src/auth/secretBox.js';
-import { extractSingleFeature, parseCrsMember } from '../../src/services/geojson.js';
+import { extractFeatures, extractSingleFeature, FEATURE_LIMITS, parseCrsMember } from '../../src/services/geojson.js';
 import { sharesSumToWhole } from '../../src/services/shares.js';
 import { detectDocumentType } from '../../src/services/files.js';
 
@@ -66,6 +66,13 @@ describe('GeoJSON intake', () => {
     const two = { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: polygon }, { type: 'Feature', geometry: polygon }] };
     expect(() => extractSingleFeature(JSON.stringify(two), 4326)).toThrow(/exactly one/);
     expect(extractSingleFeature(JSON.stringify(polygon), 4326).geometry).toEqual(polygon);
+  });
+
+  it('enforces per-case feature counts', () => {
+    const fc = (n: number) => JSON.stringify({ type: 'FeatureCollection', features: Array.from({ length: n }, () => ({ type: 'Feature', geometry: polygon })) });
+    expect(() => extractFeatures(fc(1), 4326, FEATURE_LIMITS.subdivision)).toThrow(/between 2 and 50/);
+    expect(extractFeatures(fc(3), 4326, FEATURE_LIMITS.subdivision)).toHaveLength(3);
+    expect(() => extractFeatures(fc(2), 4326, FEATURE_LIMITS.consolidation)).toThrow(/exactly one merged/);
   });
 
   it('rejects non-JSON', () => {

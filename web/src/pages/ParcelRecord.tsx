@@ -15,6 +15,9 @@ export function ParcelRecord() {
   if (error) return <div className="page"><ErrorBox error={error} /></div>;
   if (!data) return <p className="pad muted">Loading…</p>;
   const current = data.versions.find((v: any) => !v.valid_to);
+  // A retired parcel has no current version; show its last one.
+  const shown = current ?? data.versions[0];
+  const retired = data.parcel.status === 'retired';
 
   const openDispute = async (e: FormEvent) => {
     e.preventDefault();
@@ -34,10 +37,17 @@ export function ParcelRecord() {
       <div className="page-head">
         <div>
           <h1>{data.parcel.upi} <span className={`pill p-${data.parcel.status}`}>{data.parcel.status}</span></h1>
-          <p className="muted">{data.parcel.county.name} · {human(current?.land_category)} · {current?.land_use ?? '—'}</p>
+          <p className="muted">{data.parcel.county.name} · {human(shown?.land_category)} · {shown?.land_use ?? '—'}</p>
         </div>
       </div>
       <ErrorBox error={action.error} />
+      {retired && (
+        <div className="alert info">
+          This parcel is retired. It was replaced by{' '}
+          {data.children.map((c: any, i: number) => <span key={c.upi}>{i > 0 && ', '}<Link to={`/work/parcels/${c.upi}`}>{c.upi}</Link></span>)}
+          {data.children[0] && ` (${data.children[0].case_no})`}. Its records are kept as history.
+        </div>
+      )}
       <div className="grid-2">
         <div className="stack">
           <Section title="Registered interests (current)">
@@ -89,11 +99,23 @@ export function ParcelRecord() {
                 ))}
               </tbody>
             </table>
-            {current && <p className="small muted">{current.area_method}</p>}
+            {shown && <p className="small muted">{shown.area_method}</p>}
           </Section>
         </div>
         <div className="stack">
-          <ParcelMap overlays={current ? [{ id: 'p', data: current.geometry, color: '#d1342f', label: data.parcel.upi }] : []} height={340} />
+          <ParcelMap overlays={shown ? [{ id: 'p', data: shown.geometry, color: retired ? '#777' : '#d1342f', dashed: retired, label: `${data.parcel.upi}${retired ? ' (retired)' : ''}` }] : []} height={340} />
+          {(data.parents.length > 0 || data.children.length > 0) && (
+            <Section title="Lineage">
+              <ul className="plain">
+                {data.parents.map((p: any) => (
+                  <li key={`p-${p.upi}`}>Created from <Link to={`/work/parcels/${p.upi}`}>{p.upi}</Link> <span className="muted small">({p.status}) by {p.case_no}</span></li>
+                ))}
+                {data.children.map((c: any) => (
+                  <li key={`c-${c.upi}`}>Replaced by <Link to={`/work/parcels/${c.upi}`}>{c.upi}</Link> <span className="muted small">({c.status}) by {c.case_no}</span></li>
+                ))}
+              </ul>
+            </Section>
+          )}
           <Section title="Cases">
             {data.cases.length === 0 ? <p className="muted">No cases since initial load.</p> : (
               <ul className="plain">
@@ -116,7 +138,7 @@ export function ParcelRecord() {
                 </li>
               ))}
             </ul>
-            {data.canManageDisputes && (
+            {data.canManageDisputes && !retired && (
               <form onSubmit={openDispute} className="stack compact">
                 <p className="small muted">Recording a dispute blocks transfers of this parcel. The system records the dispute; it does not decide it.</p>
                 <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Nature of the dispute (10+ characters)" minLength={10} required />

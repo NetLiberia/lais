@@ -74,7 +74,18 @@ publicRouter.get('/parcels/:upi', async (req, res) => {
       WHERE p.upi = $1 AND p.status <> 'retired'`,
     [upi],
   );
-  if (!row) throw notFound('No public record for that identifier');
+  if (!row) {
+    // A retired identifier points to the parcel(s) that replaced it, so old references remain traceable.
+    const { rows: successors } = await pool.query(
+      `SELECT DISTINCT child.upi FROM lais.parcel old
+         JOIN lais.parcel_lineage l ON l.parent_parcel_id = old.id
+         JOIN lais.parcel child ON child.id = l.child_parcel_id
+        WHERE old.upi = $1 AND old.status = 'retired' ORDER BY child.upi`,
+      [upi],
+    );
+    if (successors.length === 0) throw notFound('No public record for that identifier');
+    throw notFound(`Parcel ${upi} has been retired and replaced by ${successors.map((s) => s.upi).join(', ')}`);
+  }
   const { geometry, ...properties } = row;
   res.json({ type: 'Feature', geometry, properties });
 });

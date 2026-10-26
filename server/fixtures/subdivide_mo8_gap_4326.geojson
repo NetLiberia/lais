@@ -1,0 +1,74 @@
+{
+ "type": "FeatureCollection",
+ "name": "SYNTHETIC: split of PROV-MO-000008 leaving a 22 m strip uncovered (expected COVERAGE_GAP)",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "part": 1,
+    "note": "SYNTHETIC"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.7964,
+       6.3012
+      ],
+      [
+       -10.796,
+       6.3012
+      ],
+      [
+       -10.796,
+       6.3022
+      ],
+      [
+       -10.7964,
+       6.3022
+      ],
+      [
+       -10.7964,
+       6.3012
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "part": 2,
+    "note": "SYNTHETIC"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.7958,
+       6.3012
+      ],
+      [
+       -10.7954,
+       6.3012
+      ],
+      [
+       -10.7954,
+       6.3022
+      ],
+      [
+       -10.7958,
+       6.3022
+      ],
+      [
+       -10.7958,
+       6.3012
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

@@ -28,11 +28,18 @@ export interface SingleFeature {
   properties: Record<string, unknown>;
 }
 
+/** How many parcel features each kind of case accepts in one import. */
+export const FEATURE_LIMITS: Record<string, { min: number; max: number; label: string }> = {
+  first_registration: { min: 1, max: 1, label: 'A registration case takes exactly one parcel feature' },
+  subdivision: { min: 2, max: 50, label: 'A subdivision takes between 2 and 50 new parcel features' },
+  consolidation: { min: 1, max: 1, label: 'A consolidation takes exactly one merged parcel feature' },
+};
+
 /**
- * Extracts exactly one feature for a single-parcel registration case.
- * Accepts a FeatureCollection with one feature, a Feature, or a bare geometry.
+ * Extracts the features of an import, in file order.
+ * Accepts a FeatureCollection, a Feature, or a bare geometry.
  */
-export function extractSingleFeature(text: string, declaredSrid: number): SingleFeature {
+export function extractFeatures(text: string, declaredSrid: number, limits: { min: number; max: number; label: string }): SingleFeature[] {
   let doc: any;
   try {
     doc = JSON.parse(text);
@@ -46,29 +53,34 @@ export function extractSingleFeature(text: string, declaredSrid: number): Single
     throw badRequest(`Declared CRS EPSG:${declaredSrid} conflicts with the file's CRS EPSG:${fileSrid}`);
   }
 
-  let feature: any;
+  let features: any[];
   if (doc.type === 'FeatureCollection') {
     if (!Array.isArray(doc.features)) throw badRequest('FeatureCollection has no features array');
-    if (doc.features.length !== 1) {
-      throw badRequest(
-        `A registration case takes exactly one parcel feature; this file has ${doc.features.length}. Multi-parcel batch import is a later project phase.`,
-      );
-    }
-    feature = doc.features[0];
+    features = doc.features;
   } else if (doc.type === 'Feature') {
-    feature = doc;
+    features = [doc];
   } else if (typeof doc.type === 'string' && 'coordinates' in doc) {
-    feature = { type: 'Feature', geometry: doc, properties: {} };
+    features = [{ type: 'Feature', geometry: doc, properties: {} }];
   } else {
     throw badRequest('Unsupported GeoJSON type');
   }
-
-  if (!feature?.geometry || typeof feature.geometry !== 'object') throw badRequest('The feature has no geometry');
-  const featureSrid = parseCrsMember(feature.geometry.crs);
-  if (featureSrid !== null && featureSrid !== declaredSrid) {
-    throw badRequest(`Declared CRS EPSG:${declaredSrid} conflicts with the geometry's CRS EPSG:${featureSrid}`);
+  if (features.length < limits.min || features.length > limits.max) {
+    throw badRequest(`${limits.label}; this file has ${features.length}.`);
   }
-  const { crs: _ignored, ...geometry } = feature.geometry;
-  const properties = feature.properties && typeof feature.properties === 'object' ? feature.properties : {};
-  return { geometry, properties };
+
+  return features.map((feature, i) => {
+    if (!feature?.geometry || typeof feature.geometry !== 'object') throw badRequest(`Feature ${i + 1} has no geometry`);
+    const featureSrid = parseCrsMember(feature.geometry.crs);
+    if (featureSrid !== null && featureSrid !== declaredSrid) {
+      throw badRequest(`Declared CRS EPSG:${declaredSrid} conflicts with the CRS of feature ${i + 1} (EPSG:${featureSrid})`);
+    }
+    const { crs: _ignored, ...geometry } = feature.geometry;
+    const properties = feature.properties && typeof feature.properties === 'object' ? feature.properties : {};
+    return { geometry, properties };
+  });
+}
+
+/** Single-parcel convenience wrapper. */
+export function extractSingleFeature(text: string, declaredSrid: number): SingleFeature {
+  return extractFeatures(text, declaredSrid, FEATURE_LIMITS.first_registration)[0];
 }
