@@ -1,0 +1,8 @@
+{
+  "type": "FeatureCollection",
+  "name": "SYNTHETIC bow-tie polygon, invalid (EPSG:4326)",
+  "features": [
+    { "type": "Feature", "properties": { "survey_ref": "SYNTHETIC-FIXTURE", "note": "SYNTHETIC bow-tie polygon, invalid (EPSG:4326)" },
+      "geometry": { "type": "Polygon", "coordinates": [ [[-10.7700,6.3000],[-10.7690,6.3010],[-10.7690,6.3000],[-10.7700,6.3010],[-10.7700,6.3000]] ] } }
+  ]
+}

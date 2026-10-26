@@ -1,0 +1,8 @@
+{
+  "type": "FeatureCollection",
+  "name": "SYNTHETIC valid parcel near lon -10.70 lat 6.40, coordinates in metres (EPSG:32629)",
+  "features": [
+    { "type": "Feature", "properties": { "survey_ref": "SYNTHETIC-FIXTURE", "note": "SYNTHETIC valid parcel near lon -10.70 lat 6.40, coordinates in metres (EPSG:32629)" },
+      "geometry": { "type": "Polygon", "coordinates": [ [[311950,707700],[312050,707700],[312050,707800],[311950,707800],[311950,707700]] ] } }
+  ]
+}

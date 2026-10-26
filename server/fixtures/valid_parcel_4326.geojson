@@ -1,0 +1,8 @@
+{
+  "type": "FeatureCollection",
+  "name": "SYNTHETIC valid parcel, no conflicts (EPSG:4326)",
+  "features": [
+    { "type": "Feature", "properties": { "survey_ref": "SYNTHETIC-FIXTURE", "note": "SYNTHETIC valid parcel, no conflicts (EPSG:4326)" },
+      "geometry": { "type": "Polygon", "coordinates": [ [[-10.7800,6.3000],[-10.7790,6.3000],[-10.7790,6.3010],[-10.7800,6.3010],[-10.7800,6.3000]] ] } }
+  ]
+}

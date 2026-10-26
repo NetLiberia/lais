@@ -1,0 +1,8 @@
+{
+  "type": "FeatureCollection",
+  "name": "SYNTHETIC parcel sharing an edge with PROV-MO-000001, expected: no conflict (EPSG:4326)",
+  "features": [
+    { "type": "Feature", "properties": { "survey_ref": "SYNTHETIC-FIXTURE", "note": "SYNTHETIC parcel sharing an edge with PROV-MO-000001, expected: no conflict (EPSG:4326)" },
+      "geometry": { "type": "Polygon", "coordinates": [ [[-10.8010,6.3000],[-10.8000,6.3000],[-10.8000,6.3010],[-10.8010,6.3010],[-10.8010,6.3000]] ] } }
+  ]
+}

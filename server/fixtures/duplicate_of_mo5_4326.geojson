@@ -1,0 +1,8 @@
+{
+  "type": "FeatureCollection",
+  "name": "SYNTHETIC exact copy of PROV-MO-000005, expected: duplicate geometry warning (EPSG:4326)",
+  "features": [
+    { "type": "Feature", "properties": { "survey_ref": "SYNTHETIC-FIXTURE", "note": "SYNTHETIC exact copy of PROV-MO-000005, expected: duplicate geometry warning (EPSG:4326)" },
+      "geometry": { "type": "Polygon", "coordinates": [ [[-10.8000,6.3012],[-10.7990,6.3012],[-10.7990,6.3022],[-10.8000,6.3022],[-10.8000,6.3012]] ] } }
+  ]
+}

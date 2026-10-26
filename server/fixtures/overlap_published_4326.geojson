@@ -1,0 +1,8 @@
+{
+  "type": "FeatureCollection",
+  "name": "SYNTHETIC parcel overlapping published parcels PROV-MO-000001, -000002, -000005 and -000006 (EPSG:4326)",
+  "features": [
+    { "type": "Feature", "properties": { "survey_ref": "SYNTHETIC-FIXTURE", "note": "SYNTHETIC parcel overlapping published parcels PROV-MO-000001, -000002, -000005 and -000006 (EPSG:4326)" },
+      "geometry": { "type": "Polygon", "coordinates": [ [[-10.7995,6.3005],[-10.7985,6.3005],[-10.7985,6.3015],[-10.7995,6.3015],[-10.7995,6.3005]] ] } }
+  ]
+}
