@@ -1,0 +1,39 @@
+{
+ "type": "FeatureCollection",
+ "name": "SYNTHETIC: PROV-MO-000003 extended about 33 m south (expected SIGNIFICANT_BOUNDARY_CHANGE)",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "note": "SYNTHETIC"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.797600000000001,
+       6.2997
+      ],
+      [
+       -10.796600000000002,
+       6.2997
+      ],
+      [
+       -10.796600000000002,
+       6.301
+      ],
+      [
+       -10.797600000000001,
+       6.301
+      ],
+      [
+       -10.797600000000001,
+       6.2997
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

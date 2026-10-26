@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CASE_STATUSES, TRANSITIONS, canTransition } from '../../src/authz/workflow.js';
@@ -19,7 +19,12 @@ describe('case workflow', () => {
   });
 
   it('matches the transition list enforced by the database trigger', () => {
-    const sql = readFileSync(fileURLToPath(new URL('../../db/migrations/001_core.sql', import.meta.url)), 'utf8');
+    // The trigger may be redefined by later migrations; the last definition is the one in force.
+    const dir = fileURLToPath(new URL('../../db/migrations/', import.meta.url));
+    const sql = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()
+      .map((f) => readFileSync(`${dir}/${f}`, 'utf8'))
+      .filter((s) => s.includes('FUNCTION lais.enforce_case_transition'))
+      .at(-1)!;
     const block = /\(OLD\.status, NEW\.status\) NOT IN \(([\s\S]*?)\)\s*THEN/.exec(sql)?.[1];
     expect(block).toBeTruthy();
     const fromSql = [...block!.matchAll(/\('(\w+)', '(\w+)'\)/g)].map((m) => `${m[1]}->${m[2]}`).sort();

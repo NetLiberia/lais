@@ -71,7 +71,9 @@ export async function publishApprovedCase(
     ? await publishRegistration(client, cs)
     : cs.case_type === 'transfer'
       ? await publishTransfer(client, cs)
-      : await publishReshape(client, cs);
+      : cs.case_type === 'correction'
+        ? await publishCorrection(client, cs)
+        : await publishReshape(client, cs);
 
   if (opts.simulateFailure) {
     // Test hook for the data-integrity evaluation: everything above must roll back.
@@ -156,6 +158,34 @@ async function publishTransfer(client: pg.PoolClient, cs: CaseRow): Promise<Publ
   );
   await insertProposedRights(client, cs, parcel.id, null);
   return { parcelId: parcel.id, upi: parcel.upi };
+}
+
+/**
+ * Correction: closes the current version and publishes the next one with the corrected boundary
+ * (from staging, or unchanged) and attributes. The erroneous version stays in the history. Rights are untouched.
+ */
+async function publishCorrection(client: pg.PoolClient, cs: CaseRow): Promise<Published> {
+  const { rows: [parcel] } = await client.query(
+    `SELECT p.id, p.upi, v.id AS version_id, v.version_no
+       FROM lais.parcel p JOIN lais.parcel_version v ON v.id = p.current_version_id
+      WHERE p.id = $1 FOR UPDATE OF p`,
+    [cs.parcel_id],
+  );
+  const [feature] = await activeFeatures(client, cs.id);
+  await client.query('UPDATE lais.parcel_version SET valid_to = now() WHERE id = $1', [parcel.version_id]);
+  const { rows: [version] } = await client.query(
+    `INSERT INTO lais.parcel_version
+       (parcel_id, version_no, geom, area_m2_calculated, area_method, area_m2_surveyed, land_category, land_use, source_reference, published_by_case)
+     SELECT $1, $2, g, round(ST_Area(g::geography)::numeric, 2), $3, $4, $5, $6, $7, $8
+       FROM (SELECT coalesce((SELECT f.geom FROM staging.feature f WHERE f.id = $9 AND f.structural_ok),
+                             (SELECT v.geom FROM lais.parcel_version v WHERE v.id = $10)) AS g) s
+     RETURNING id`,
+    [parcel.id, parcel.version_no + 1, AREA_METHOD, cs.area_m2_surveyed, cs.land_category, cs.land_use, cs.source_reference, cs.id,
+      feature?.id ?? null, parcel.version_id],
+  );
+  await client.query('UPDATE lais.parcel SET current_version_id = $2 WHERE id = $1', [parcel.id, version.id]);
+  if (feature) await client.query(`UPDATE staging.batch SET status = 'published' WHERE case_id = $1 AND status = 'active'`, [cs.id]);
+  return { parcelId: parcel.id, upi: `${parcel.upi} (version ${parcel.version_no + 1})` };
 }
 
 /**

@@ -95,7 +95,8 @@ describe('record status', () => {
     for (const status of ['under_review', 'approved', 'published', 'rejected'] as const) {
       expect(authorize(processorMO, 'case.edit_rights', { countyId: MO, caseStatus: status }).allowed).toBe(false);
     }
-    expect(authorize(processorMO, 'case.edit_rights', { countyId: MO, caseStatus: 'returned' }).allowed).toBe(true);
+    expect(authorize(processorMO, 'case.edit_rights', { countyId: MO, caseStatus: 'returned', caseType: 'transfer' }).allowed).toBe(true);
+    expect(authorize(processorMO, 'case.edit_rights', { countyId: MO, caseStatus: 'returned', caseType: 'correction' }).allowed).toBe(false);
   });
 
   it('only publishes approved cases', () => {

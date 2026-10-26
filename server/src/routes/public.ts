@@ -15,7 +15,16 @@ export const PUBLIC_PARCEL_FIELDS = ['upi', 'county', 'land_category', 'land_use
 
 export const publicRouter = Router();
 
-publicRouter.use(rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false }));
+// Anonymous visitors are rate limited per address. Signed-in staff are not: their maps use this endpoint
+// too, and a county office behind one shared connection would otherwise exhaust a per-address limit.
+// The session is verified (loadSession runs first), so a fabricated cookie does not bypass the limit.
+publicRouter.use(rateLimit({
+  windowMs: 60 * 1000,
+  limit: 300,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skip: (req) => req.auth?.state === 'active',
+}));
 
 const STATUS_LABEL = `CASE p.status WHEN 'active' THEN 'registered' WHEN 'disputed' THEN 'under dispute' ELSE p.status END`;
 

@@ -1,4 +1,4 @@
-import { EDITABLE_STATUSES, SPATIAL_CASE_TYPES, type CaseStatus, type CaseType } from './workflow.js';
+import { EDITABLE_STATUSES, RIGHTS_CASE_TYPES, SPATIAL_CASE_TYPES, type CaseStatus, type CaseType } from './workflow.js';
 
 /**
  * Role-based access control combined with jurisdiction, record status and
@@ -48,7 +48,7 @@ const RULES = {
   'case.view': { roles: INTERNAL_READERS, scope: 'county' },
   'case.edit_attributes': { roles: PREPARERS, scope: 'county', statuses: EDITABLE_STATUSES },
   'case.import_geometry': { roles: ['gis_officer'], scope: 'county', statuses: EDITABLE_STATUSES, caseTypes: SPATIAL_CASE_TYPES },
-  'case.edit_rights': { roles: ['processor'], scope: 'county', statuses: EDITABLE_STATUSES },
+  'case.edit_rights': { roles: ['processor'], scope: 'county', statuses: EDITABLE_STATUSES, caseTypes: RIGHTS_CASE_TYPES },
   'case.upload_document': { roles: PREPARERS, scope: 'county', statuses: EDITABLE_STATUSES },
   'case.verify_document': { roles: ['processor'], scope: 'county', statuses: EDITABLE_STATUSES },
   'case.validate': { roles: PREPARERS, scope: 'county', statuses: EDITABLE_STATUSES },

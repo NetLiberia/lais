@@ -21,9 +21,10 @@ Phase 3 prototype for the MSc project *Development and Evaluation of a Privacy-A
 | Atomic publication (single transaction, serialised per county) with full rollback on failure | `services/publication.ts` |
 | Transfers end old interests and register new ones; history is immutable (triggers block edits and deletes) | `publication.ts`, `001_core.sql` |
 | Subdivision (one parcel into 2–50) and consolidation (2+ parcels into one): new parcels must not overlap each other and must cover the source area exactly; rights are recorded per new parcel; sources are retired, never deleted, and parent→child lineage is kept. Retired identifiers on the public portal point to their replacements | `services/validation.ts` (`reshapeChecks`), `services/publication.ts` (`publishReshape`), `004_reshaping.sql` |
+| Corrections: fix a published boundary or attributes (land use, category, source reference, surveyed area) by publishing a new version; the erroneous version stays in the history and rights are never changed. Requires a stated reason and verified evidence (a survey plan for boundary changes). Large boundary moves are flagged (`SIGNIFICANT_BOUNDARY_CHANGE_M`, `SIGNIFICANT_AREA_CHANGE_PCT`) | `correctionChecks`, `publishCorrection`, `006_corrections.sql` |
 | Disputes: recorded by registrars, block transfers, closed with a recorded outcome | `routes/parcels.ts` |
 | Protected documents: content-type sniffing, private storage, SHA-256 integrity check on every read, classification-based access, all downloads audited | `routes/cases.ts`, `routes/documents.ts` |
-| Authentication: scrypt hashes, progressive lockout, server-side sessions (hash-only token storage), CSRF tokens, optional mandatory TOTP MFA for privileged roles | `server/src/auth/*`, `routes/auth.ts` |
+| Authentication: scrypt hashes, progressive lockout, sign-in rate limits per account (plus a generous per-address ceiling, so offices sharing one connection are not locked out), server-side sessions (hash-only token storage), CSRF tokens, optional mandatory TOTP MFA for privileged roles | `server/src/auth/*`, `routes/auth.ts` |
 | Append-only, hash-chained audit log with tamper detection | `003_audit.sql`, `routes/audit.ts` |
 | Landowner portal: only interests registered to parties linked to the account by staff | `routes/me.ts`, `pages/MyParcels.tsx` |
 | Landowner document requests: a landowner asks for copies on a parcel where they hold a registered interest; a processor chooses verified documents from published cases; a different registrar approves or refuses with a reason; copies can be downloaded for `DOCUMENT_RELEASE_DAYS`. Eligibility is re-checked at every download, highly sensitive documents are never released (enforced in the database too), and every download is audited | `routes/me.ts`, `routes/documentRequests.ts`, `005_document_requests.sql` |
@@ -95,7 +96,7 @@ npm test
 ```
 
 - **36 unit tests**: permission matrix, cross-county denial, separation of duties, workflow (including a check that the TypeScript transition table matches the SQL trigger), TOTP RFC test vectors, password hashing, GeoJSON/CRS intake, fractional shares, file sniffing.
-- **51 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration, transfer, subdivision and consolidation lifecycles, landowner document requests, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, and admin limits.
+- **59 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration, transfer, subdivision, consolidation and correction lifecycles, landowner document requests, rate limits, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, and admin limits.
 
 ## Demo accounts (synthetic)
 
@@ -125,6 +126,8 @@ All use `SEED_PASSWORD`.
 Other fixtures: `adjacent_touching` (expected: no conflict), `duplicate_of_mo5`, `crosses_county`, `swapped_axes`, `self_intersecting`, `valid_parcel_4326`, and `valid_parcel_utm29n` (import with EPSG:32629). PROV-MO-000007 is seeded as disputed, so transfers of it are blocked.
 
 **Subdivision:** as gis.mo, open a *Subdivision* of PROV-MO-000008 and import `subdivide_mo8_halves_4326.geojson`. Then, as proc.mo, use *Copy current ownership to each new parcel*. `subdivide_mo8_gap_4326` and `subdivide_mo8_overlap_4326` show the coverage and overlap errors. After publishing, `consolidate_mo8_halves_4326` merges the two halves back together.
+
+**Correction:** as gis.mo, open a *Correction* of PROV-MO-000003, change the land use, import `correct_mo3_minor_4326.geojson`, and add a survey plan. Or import `correct_mo3_major_4326` to see the large-change warning.
 
 **Document request:** documents can be released only from published cases, and seeded parcels have none. So first publish a transfer of, for example, PROV-MO-000010 to *Musu Testperson*, with a verified deed. Then sign in as owner.demo → *My land* → *Request documents*. proc.mo prepares the release under *Document requests*, reg.mo decides, and owner.demo downloads the copy.
 

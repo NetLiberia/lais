@@ -22,15 +22,31 @@ import {
 
 export const authRouter = Router();
 
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false });
-const mfaLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false });
+// Guessing is limited per account, not only per address: county offices often share one public IP,
+// so a tight per-IP limit would lock a whole office out because of one person's mistakes.
+const FIFTEEN_MINUTES = 15 * 60 * 1000;
+const limiterDefaults = { windowMs: FIFTEEN_MINUTES, standardHeaders: 'draft-7' as const, legacyHeaders: false };
+const loginPerAccountLimiter = rateLimit({
+  ...limiterDefaults,
+  limit: 10,
+  keyGenerator: (req) => `login:${String(req.body?.username ?? '').trim().toLowerCase().slice(0, 64)}`,
+  message: { error: 'Too many sign-in attempts for this account; try again in 15 minutes' },
+});
+// A generous ceiling per address still stops one machine trying passwords across many accounts.
+const loginPerAddressLimiter = rateLimit({ ...limiterDefaults, limit: 300, message: { error: 'Too many sign-in attempts from this network; try again later' } });
+const mfaLimiter = rateLimit({
+  ...limiterDefaults,
+  limit: 10,
+  keyGenerator: (req) => `mfa:${req.auth?.user.id ?? 'no-session'}`,
+  message: { error: 'Too many code attempts; try again in 15 minutes' },
+});
 
 const GENERIC_LOGIN_FAILURE = 'Invalid username or password, or the account is temporarily locked';
 const MAX_FAILURES_BEFORE_LOCK = 5;
 
 const loginBody = z.object({ username: z.string().min(1).max(64), password: z.string().min(1).max(256) });
 
-authRouter.post('/login', loginLimiter, async (req, res) => {
+authRouter.post('/login', loginPerAddressLimiter, loginPerAccountLimiter, async (req, res) => {
   const body = loginBody.parse(req.body);
   const username = body.username.trim().toLowerCase();
   const { rows: [user] } = await pool.query(

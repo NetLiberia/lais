@@ -139,3 +139,4 @@ tr.muted td { color: var(--muted); }
 .map-legend { position: absolute; z-index: 1000; bottom: 26px; left: 8px; background: rgba(255,255,255,0.92); padding: 0.3rem 0.5rem; border-radius: 6px; font-size: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.6rem; max-width: calc(100% - 16px); }
 .map-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border-radius: 2px; vertical-align: middle; }
 .map-legend i.dashed { border: 2px dashed #555; background: transparent; }
+.changed { color: var(--warn-text); font-weight: 600; }

@@ -36,6 +36,10 @@ export const config = {
   minParcelAreaM2: number('MIN_PARCEL_AREA_M2', 10),
   /** How long a landowner can download documents released to them. */
   documentReleaseDays: number('DOCUMENT_RELEASE_DAYS', 30),
+  /** A corrected boundary moving further than this from the published one is flagged for review. */
+  significantBoundaryChangeM: number('SIGNIFICANT_BOUNDARY_CHANGE_M', 5),
+  /** A corrected boundary changing the calculated area by more than this percentage is flagged. */
+  significantAreaChangePct: number('SIGNIFICANT_AREA_CHANGE_PCT', 10),
   /** Largest gap or excess allowed between the new parcels and the parcels they replace. */
   coverageToleranceM2: number('COVERAGE_TOLERANCE_M2', 1),
 };

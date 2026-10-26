@@ -136,6 +136,15 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
       expect(JSON.stringify(res.body)).not.toMatch(/Testperson|SYN-ID|Bank/);
     });
 
+    it('does not rate-limit signed-in staff using the map', async () => {
+      // More requests than the anonymous per-address limit (300 a minute).
+      const statuses = new Set<number>();
+      for (let i = 0; i < 310; i++) {
+        statuses.add((await as('reg.mo').get(`/api/public/parcels?bbox=-10.81,6.29,-10.79,${(6.31 + i * 1e-6).toFixed(6)}`)).status);
+      }
+      expect([...statuses]).toEqual([200]);
+    });
+
     it('refuses very large bounding boxes', async () => {
       const res = await request(app).get('/api/public/parcels?bbox=-12,4,-7,9');
       expect(res.body.features).toEqual([]);
@@ -151,6 +160,15 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
     it('rejects state-changing requests without the CSRF token', async () => {
       const res = await as('gis.mo').agent.post('/api/cases').send({ caseType: 'first_registration', countyId: 1 });
       expect(res.status).toBe(403);
+    });
+
+    it('limits sign-in attempts per account without locking out colleagues on the same network', async () => {
+      for (let i = 0; i < 10; i++) {
+        expect((await request(app).post('/api/auth/login').send({ username: 'guessed.account', password: `wrong-${i}` })).status).toBe(401);
+      }
+      expect((await request(app).post('/api/auth/login').send({ username: 'guessed.account', password: 'wrong-again' })).status).toBe(429);
+      // Same address, different account: unaffected.
+      expect((await new Client('supervisor').agent.post('/api/auth/login').send({ username: 'supervisor', password: PASSWORD })).status).toBe(200);
     });
 
     it('gives the same answer for unknown users and wrong passwords', async () => {
@@ -511,6 +529,105 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
       expect(codes(result)).toEqual(expect.arrayContaining(['COVERAGE_GAP', 'COVERAGE_EXCEEDS_SOURCE']));
       // A lease on PROV-MO-000012 ends at retirement unless re-recorded, so the officer is warned.
       expect(codes(result)).toContain('ENCUMBRANCE_PRESENT');
+    });
+  });
+
+  describe('corrections', () => {
+    const codes = (r: { findings: { code: string }[] }) => r.findings.map((f) => f.code);
+
+    async function openCorrection(upi: string, reason?: string) {
+      const created = await as('gis.mo').post('/api/cases', { caseType: 'correction', parcelUpi: upi, correctionReason: reason });
+      expect(created.status).toBe(201);
+      return created.body.id as string;
+    }
+
+    async function addVerified(id: string, docType: string) {
+      const doc = await as('gis.mo').upload(`/api/cases/${id}/documents`, fixture('synthetic_document.pdf'), 'evidence.pdf', { docType, classification: 'restricted' });
+      expect((await as('proc.mo').post(`/api/cases/${id}/documents/${doc.body.id}/verify`, { status: 'verified', note: 'Evidence checked' })).status).toBe(200);
+    }
+
+    async function approveAndPublish(id: string) {
+      await acknowledgeAll(id);
+      expect((await approve(id)).status).toBe(200);
+      return as('reg.mo').post(`/api/cases/${id}/publish`);
+    }
+
+    it('rejects a correction that changes nothing or gives no reason', async () => {
+      const id = await openCorrection('PROV-MO-000004');
+      const result = await submit(id);
+      expect(result.status).toBe('returned');
+      expect(codes(result)).toEqual(expect.arrayContaining(['NO_CHANGE', 'CORRECTION_REASON_MISSING', 'MISSING_CORRECTION_EVIDENCE']));
+      await as('gis.mo').post(`/api/cases/${id}/withdraw`, { reason: 'Opened in error' });
+    });
+
+    it('never changes rights', async () => {
+      const id = await openCorrection('PROV-MO-000004', 'Land use was recorded incorrectly at initial load');
+      const res = await as('proc.mo').post(`/api/cases/${id}/rights`, { partyId: await partyId('Hawa'), rrrType: 'ownership' });
+      expect(res.status).toBe(403);
+      await as('gis.mo').post(`/api/cases/${id}/withdraw`, { reason: 'Test case not needed' });
+    });
+
+    it('corrects attributes by publishing a new version and keeping the old one', async () => {
+      const id = await openCorrection('PROV-MO-000004', 'Land use and surveyed area were transcribed incorrectly from the 2019 register');
+      expect((await as('gis.mo').patch(`/api/cases/${id}`, { landUse: 'institutional (school)', areaM2Surveyed: 12200 })).status).toBe(200);
+      await addVerified(id, 'other');
+      const result = await submit(id);
+      expect(result.findings.filter((f) => f.severity === 'error')).toEqual([]);
+      const pub = await approveAndPublish(id);
+      expect(pub.status).toBe(200);
+
+      const record = (await as('reg.mo').get('/api/parcels/PROV-MO-000004')).body;
+      expect(record.versions).toHaveLength(2);
+      const [v2, v1] = record.versions;
+      expect(v2).toMatchObject({ version_no: 2, land_use: 'institutional (school)', valid_to: null });
+      expect(Number(v2.area_m2_surveyed)).toBe(12200);
+      expect(v1.land_use).toBe('institutional');
+      expect(v1.valid_to).not.toBeNull();
+      expect(v2.area_m2_calculated).toBe(v1.area_m2_calculated); // boundary unchanged
+      expect(record.currentRights.map((r: any) => r.party_name)).toEqual(['Example Ministry (synthetic government entity)']);
+    });
+
+    it('needs a survey plan for a boundary correction, and accepts a minor fix without a warning', async () => {
+      const id = await openCorrection('PROV-MO-000003', 'East boundary beacon was mis-recorded by about 2 metres');
+      await as('gis.mo').upload(`/api/cases/${id}/geometry`, fixture('correct_mo3_minor_4326.geojson'), 'minor.geojson', { crs: '4326' });
+      await addVerified(id, 'other');
+      let result = await submit(id);
+      expect(codes(result)).toContain('MISSING_SURVEY_PLAN');
+
+      await addVerified(id, 'survey_plan');
+      result = await submit(id);
+      expect(result.status).toBe('under_review');
+      expect(codes(result)).not.toContain('SIGNIFICANT_BOUNDARY_CHANGE');
+      const before = (await as('reg.mo').get('/api/parcels/PROV-MO-000003')).body.versions[0];
+      expect((await approveAndPublish(id)).status).toBe(200);
+      const after = (await as('reg.mo').get('/api/parcels/PROV-MO-000003')).body.versions[0];
+      expect(after.version_no).toBe(2);
+      expect(Number(after.area_m2_calculated)).toBeGreaterThan(Number(before.area_m2_calculated));
+    });
+
+    it('flags a large boundary change for the registrar', async () => {
+      const id = await openCorrection('PROV-MO-000003', 'South boundary claimed to be wrong on the original survey');
+      await as('gis.mo').upload(`/api/cases/${id}/geometry`, fixture('correct_mo3_major_4326.geojson'), 'major.geojson', { crs: '4326' });
+      await addVerified(id, 'survey_plan');
+      const result = await submit(id);
+      expect(codes(result)).toContain('SIGNIFICANT_BOUNDARY_CHANGE');
+      await as('reg.mo').post(`/api/cases/${id}/decision`, { decision: 'returned', reason: 'Needs field verification before a change this size' });
+    });
+
+    it('reopens an approved correction if the parcel was corrected again in the meantime', async () => {
+      const a = await openCorrection('PROV-MO-000005', 'Land use recorded incorrectly (first correction)');
+      const b = await openCorrection('PROV-MO-000005', 'Source reference recorded incorrectly (second correction)');
+      await as('gis.mo').patch(`/api/cases/${a}`, { landUse: 'mixed use' });
+      await as('gis.mo').patch(`/api/cases/${b}`, { sourceReference: 'SYNTHETIC-SURVEY-0005-REV' });
+      for (const id of [a, b]) {
+        await addVerified(id, 'other');
+        await submit(id);
+        await acknowledgeAll(id);
+        expect((await approve(id)).status).toBe(200);
+      }
+      expect((await as('reg.mo').post(`/api/cases/${b}/publish`)).status).toBe(200);
+      expect((await as('reg.mo').post(`/api/cases/${a}/publish`)).status).toBe(409);
+      expect((await caseDetail(a)).case.status).toBe('under_review');
     });
   });
 

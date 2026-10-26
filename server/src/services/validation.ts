@@ -38,12 +38,77 @@ export async function evaluateCase(db: Db, cs: CaseRow): Promise<Evaluation> {
     batchId = await registrationChecks(db, cs, findings);
   } else if (cs.case_type === 'transfer') {
     landCategory = await transferChecks(db, cs, findings);
+  } else if (cs.case_type === 'correction') {
+    batchId = await correctionChecks(db, cs, findings);
   } else {
     batchId = await reshapeChecks(db, cs, findings);
   }
-  await rightsChecks(db, cs, landCategory, findings);
-  await documentChecks(db, cs, findings);
+  // A correction never changes rights, so there are no proposals to check.
+  if (cs.case_type !== 'correction') await rightsChecks(db, cs, landCategory, findings);
+  await documentChecks(db, cs, findings, batchId !== null);
   return { findings, batchId };
+}
+
+/**
+ * Correction of a published parcel's boundary and/or attributes. The result is a new version; the
+ * erroneous version stays in the history. Large boundary changes are flagged, because a "correction"
+ * that moves a boundary substantially may really be a transfer of land between neighbours.
+ */
+async function correctionChecks(db: Db, cs: CaseRow, out: Finding[]): Promise<string | null> {
+  if (!cs.correction_reason || cs.correction_reason.trim().length < 10) {
+    out.push(err('CORRECTION_REASON_MISSING', 'Describe the error being corrected and how it was established (10+ characters)'));
+  }
+  const { rows: [current] } = await db.query(
+    `SELECT p.id, p.upi, p.status, p.county_id, v.land_category, v.land_use, v.source_reference, v.area_m2_surveyed, v.area_m2_calculated
+       FROM lais.parcel p JOIN lais.parcel_version v ON v.id = p.current_version_id AND v.valid_to IS NULL
+      WHERE p.id = $1`,
+    [cs.parcel_id],
+  );
+  if (!current) {
+    out.push(err('PARCEL_NOT_FOUND', 'The parcel to correct has no current published version'));
+    return null;
+  }
+  parcelStateChecks(current, cs, 'correction', out);
+  await competingCaseWarnings(db, cs, [current.id], out);
+
+  const features = await stagedFeatures(db, cs.id);
+  const batchId = features[0]?.batch_id ?? null;
+  let boundaryChanged = false;
+  if (features.length > 0 && (await geometryChecks(db, cs, features, [current.id], out))) {
+    const { rows: [diff] } = await db.query(
+      `SELECT ST_HausdorffDistance(ST_Transform(v.geom, ${METRIC_SRID}), ST_Transform(f.geom, ${METRIC_SRID})) AS moved_m,
+              ST_Area(f.geom::geography) AS new_area_m2, ST_Area(v.geom::geography) AS old_area_m2,
+              ST_Equals(v.geom, f.geom) AS same
+         FROM staging.feature f, lais.parcel_version v
+        WHERE f.id = $1 AND v.id = (SELECT current_version_id FROM lais.parcel WHERE id = $2)`,
+      [features[0].id, current.id],
+    );
+    boundaryChanged = !diff.same;
+    const areaChangePct = Math.abs(diff.new_area_m2 - diff.old_area_m2) / diff.old_area_m2 * 100;
+    if (diff.moved_m > config.significantBoundaryChangeM || areaChangePct > config.significantAreaChangePct) {
+      out.push(warn('SIGNIFICANT_BOUNDARY_CHANGE',
+        `The corrected boundary moves up to ${Number(diff.moved_m).toFixed(1)} m and changes the calculated area by ${areaChangePct.toFixed(1)}%. ` +
+        'Confirm this is a correction of an error and not a change of the land held, which would need its own transaction.',
+        { relatedParcelId: current.id, detail: { moved_m: Number(diff.moved_m), areaChangePct } }));
+    }
+  } else if (features.length > 0) {
+    boundaryChanged = true; // invalid geometry; the error above blocks the case
+  }
+
+  const attributeChanged =
+    (cs.land_category ?? null) !== (current.land_category ?? null) ||
+    (cs.land_use ?? null) !== (current.land_use ?? null) ||
+    (cs.source_reference ?? null) !== (current.source_reference ?? null) ||
+    (cs.area_m2_surveyed === null ? null : Number(cs.area_m2_surveyed)) !== (current.area_m2_surveyed === null ? null : Number(current.area_m2_surveyed));
+  if (!boundaryChanged && !attributeChanged) {
+    out.push(err('NO_CHANGE', 'The correction does not change anything in the published record'));
+  }
+  if (!cs.land_category) out.push(err('LAND_CATEGORY_MISSING', 'The corrected record needs a land category'));
+  if (!cs.source_reference?.trim()) out.push(err('SOURCE_REFERENCE_MISSING', 'A survey or source record reference is required'));
+  if (cs.land_category && cs.land_category !== current.land_category) {
+    out.push(warn('CATEGORY_CHANGE', `The land category changes from ${current.land_category} to ${cs.land_category}; a category change needs its own legal basis`, { relatedParcelId: current.id }));
+  }
+  return batchId;
 }
 
 const err = (code: string, message: string, extra: Partial<Finding> = {}): Finding => ({ code, severity: 'error', message, ...extra });
@@ -421,7 +486,7 @@ async function rightsChecks(db: Db, cs: CaseRow, landCategory: string | null, ou
 }
 
 
-async function documentChecks(db: Db, cs: CaseRow, out: Finding[]): Promise<void> {
+async function documentChecks(db: Db, cs: CaseRow, out: Finding[], hasGeometry: boolean): Promise<void> {
   const { rows: docs } = await db.query(
     `SELECT id, doc_type, reference_no, verification_status FROM lais.document WHERE case_id = $1`,
     [cs.id],
@@ -440,6 +505,12 @@ async function documentChecks(db: Db, cs: CaseRow, out: Finding[]): Promise<void
     }
   } else if (cs.case_type === 'transfer') {
     if (!verified('deed')) out.push(err('MISSING_TRANSFER_DEED', 'A verified transfer deed is required'));
+  } else if (cs.case_type === 'correction') {
+    if (hasGeometry && !verified('survey_plan')) {
+      out.push(err('MISSING_SURVEY_PLAN', 'A boundary correction needs a verified survey plan'));
+    } else if (!docs.some((d) => d.verification_status === 'verified')) {
+      out.push(err('MISSING_CORRECTION_EVIDENCE', 'Verified evidence of the error is required'));
+    }
   } else if (!verified('survey_plan')) {
     out.push(err('MISSING_SURVEY_PLAN', `A verified survey plan for the ${cs.case_type} is required`));
   }

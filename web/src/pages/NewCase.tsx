@@ -4,13 +4,14 @@ import { api } from '../api';
 import { useAuth } from '../auth';
 import { ErrorBox, useAction } from '../components/ui';
 
-type CaseType = 'first_registration' | 'transfer' | 'subdivision' | 'consolidation';
+type CaseType = 'first_registration' | 'transfer' | 'subdivision' | 'consolidation' | 'correction';
 
 const TYPES: { value: CaseType; label: string; hint: string }[] = [
   { value: 'first_registration', label: 'First registration', hint: 'Record a parcel that is not yet in the register.' },
   { value: 'transfer', label: 'Transfer', hint: 'Change who holds the interest in a published parcel. The boundary is unchanged.' },
   { value: 'subdivision', label: 'Subdivision', hint: 'Split one published parcel into two or more new parcels.' },
   { value: 'consolidation', label: 'Consolidation', hint: 'Merge two or more published parcels into one.' },
+  { value: 'correction', label: 'Correction', hint: 'Fix an error in a published boundary or record. Rights are not changed.' },
 ];
 
 /** Splits a list of identifiers typed with commas, spaces or new lines. */
@@ -32,6 +33,7 @@ export function NewCase() {
   const [proposedUpi, setProposedUpi] = useState('');
   const [parcelUpi, setParcelUpi] = useState('');
   const [parcelUpis, setParcelUpis] = useState('');
+  const [correctionReason, setCorrectionReason] = useState('');
   const { busy, error, run } = useAction();
 
   const onSubmit = async (e: FormEvent) => {
@@ -42,7 +44,9 @@ export function NewCase() {
         ? { caseType, countyId, landCategory, landUse: landUse || undefined, sourceReference: reference, proposedUpi: proposedUpi.trim() || undefined }
         : caseType === 'consolidation'
           ? { caseType, parcelUpis: parseUpis(parcelUpis), sourceReference: reference }
-          : { caseType, parcelUpi: parcelUpi.trim(), sourceReference: reference };
+          : caseType === 'correction'
+            ? { caseType, parcelUpi: parcelUpi.trim(), correctionReason: correctionReason || undefined }
+            : { caseType, parcelUpi: parcelUpi.trim(), sourceReference: reference };
     let id = '';
     if (await run(async () => { id = (await api<{ id: string }>('/cases', { body })).id; })) navigate(`/work/cases/${id}`);
   };
@@ -82,7 +86,7 @@ export function NewCase() {
             </label>
           </>
         )}
-        {(caseType === 'transfer' || caseType === 'subdivision') && (
+        {(caseType === 'transfer' || caseType === 'subdivision' || caseType === 'correction') && (
           <label>Published parcel identifier<input value={parcelUpi} onChange={(e) => setParcelUpi(e.target.value.toUpperCase())} placeholder="PROV-MO-000001" required /></label>
         )}
         {caseType === 'consolidation' && (
@@ -93,7 +97,16 @@ export function NewCase() {
         {(caseType === 'subdivision' || caseType === 'consolidation') && (
           <p className="small muted">The new parcel(s) start with the land category and use of the source; you can change them before submitting. New identifiers are assigned at publication.</p>
         )}
-        <label>Survey / source record reference<input value={sourceReference} onChange={(e) => setSourceReference(e.target.value)} /></label>
+        {caseType === 'correction' ? (
+          <>
+            <label>What is wrong, and how was it established?
+              <textarea value={correctionReason} onChange={(e) => setCorrectionReason(e.target.value)} placeholder="e.g. Land use was transcribed incorrectly from the 2019 register" />
+            </label>
+            <p className="small muted">The case starts with the current record. Change only what is wrong; the published version is kept in the history.</p>
+          </>
+        ) : (
+          <label>Survey / source record reference<input value={sourceReference} onChange={(e) => setSourceReference(e.target.value)} /></label>
+        )}
         <ErrorBox error={error} />
         <button type="submit" disabled={busy}>Create draft case</button>
       </form>

@@ -1,0 +1,39 @@
+{
+ "type": "FeatureCollection",
+ "name": "SYNTHETIC: PROV-MO-000003 with its east edge moved about 2 m (minor correction)",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "note": "SYNTHETIC"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.797600000000001,
+       6.3
+      ],
+      [
+       -10.796580000000002,
+       6.3
+      ],
+      [
+       -10.796580000000002,
+       6.301
+      ],
+      [
+       -10.797600000000001,
+       6.301
+      ],
+      [
+       -10.797600000000001,
+       6.3
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

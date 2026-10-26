@@ -96,6 +96,11 @@ const createBody = z.discriminatedUnion('caseType', [
     sourceReference: z.string().max(200).optional(),
   }),
   z.object({
+    caseType: z.literal('correction'),
+    parcelUpi: z.string().min(1).max(40),
+    correctionReason: z.string().trim().max(2000).optional(),
+  }),
+  z.object({
     caseType: z.literal('consolidation'),
     parcelUpis: z.array(z.string().min(1).max(40)).min(2).max(20),
     sourceReference: z.string().max(200).optional(),
@@ -110,6 +115,8 @@ casesRouter.post('/', async (req, res) => {
     let sourceIds: string[] = [];
     let landCategory: string | null = null;
     let landUse: string | null = null;
+    let sourceReference: string | null = body.caseType === 'correction' ? null : body.sourceReference ?? null;
+    let areaSurveyed: string | null = null;
 
     if (body.caseType === 'first_registration') {
       countyId = body.countyId;
@@ -122,7 +129,7 @@ casesRouter.post('/', async (req, res) => {
       const upis = body.caseType === 'consolidation' ? [...new Set(body.parcelUpis)] : [body.parcelUpi];
       if (body.caseType === 'consolidation' && upis.length < 2) throw badRequest('List at least two different parcels to merge');
       const { rows: parcels } = await client.query(
-        `SELECT p.id, p.upi, p.county_id, p.status, v.land_category, v.land_use
+        `SELECT p.id, p.upi, p.county_id, p.status, v.land_category, v.land_use, v.source_reference, v.area_m2_surveyed
            FROM lais.parcel p LEFT JOIN lais.parcel_version v ON v.id = p.current_version_id
           WHERE p.upi = ANY($1)`,
         [upis],
@@ -135,6 +142,13 @@ casesRouter.post('/', async (req, res) => {
       countyId = parcels[0].county_id;
       if (body.caseType === 'transfer') {
         parcelId = parcels[0].id;
+      } else if (body.caseType === 'correction') {
+        // A correction starts from the current record; officers change only what is wrong.
+        parcelId = parcels[0].id;
+        landCategory = parcels[0].land_category;
+        landUse = parcels[0].land_use;
+        sourceReference = parcels[0].source_reference;
+        areaSurveyed = parcels[0].area_m2_surveyed;
       } else {
         sourceIds = parcels.map((p) => p.id);
         // New parcels start with the category and use of their source; officers can change them before submitting.
@@ -145,17 +159,20 @@ casesRouter.post('/', async (req, res) => {
     enforce(req, 'case.create', { countyId }, { entityType: 'case' });
 
     const { rows: [cs] } = await client.query(
-      `INSERT INTO lais.land_case (case_type, county_id, parcel_id, land_category, land_use, source_reference, proposed_upi, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, case_no`,
+      `INSERT INTO lais.land_case (case_type, county_id, parcel_id, land_category, land_use, source_reference, proposed_upi, created_by,
+                                   correction_reason, area_m2_surveyed)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, case_no`,
       [
         body.caseType,
         countyId,
         parcelId,
         landCategory,
         landUse,
-        body.sourceReference ?? null,
+        sourceReference,
         body.caseType === 'first_registration' ? body.proposedUpi ?? null : null,
         req.auth!.user.id,
+        body.caseType === 'correction' ? body.correctionReason || null : null,
+        areaSurveyed,
       ],
     );
     for (const sourceId of sourceIds) {
@@ -221,7 +238,7 @@ casesRouter.get('/:id', async (req, res) => {
     ),
     cs.parcel_id
       ? pool.query(
-          `SELECT p.id, p.upi, p.status, v.land_category, v.land_use, v.area_m2_calculated,
+          `SELECT p.id, p.upi, p.status, v.version_no, v.land_category, v.land_use, v.area_m2_calculated, v.area_m2_surveyed, v.source_reference,
                   ST_AsGeoJSON(v.geom, 7)::json AS geometry,
                   coalesce((SELECT json_agg(json_build_object('rrrType', r.rrr_type, 'share', CASE WHEN r.share_den IS NULL THEN NULL ELSE r.share_num || '/' || r.share_den END,
                                                     'partyName', pa.name, 'partyType', pa.party_type, 'interestStatus', r.interest_status))
@@ -299,6 +316,8 @@ const attributesBody = z.object({
   landUse: z.string().max(100).nullable().optional(),
   sourceReference: z.string().max(200).nullable().optional(),
   proposedUpi: z.string().regex(PROVISIONAL_UPI_PATTERN, 'Use the provisional pattern PROV-XX-000000').nullable().optional(),
+  correctionReason: z.string().trim().max(2000).nullable().optional(),
+  areaM2Surveyed: z.number().positive().max(1e10).nullable().optional(),
 });
 
 casesRouter.patch('/:id', async (req, res) => {
@@ -308,20 +327,31 @@ casesRouter.patch('/:id', async (req, res) => {
       throw badRequest('A transfer does not change the parcel category, land use or identifier');
     }
     if (cs.case_type !== 'first_registration' && body.proposedUpi) {
-      throw badRequest('New parcels from a subdivision or consolidation receive identifiers at publication');
+      throw badRequest('Only a first registration can propose an identifier');
+    }
+    if (cs.case_type !== 'correction' && (body.correctionReason !== undefined || body.areaM2Surveyed !== undefined)) {
+      throw badRequest('Correction reason and surveyed area apply only to correction cases');
     }
     const next = {
       land_category: body.landCategory !== undefined ? body.landCategory : cs.land_category,
       land_use: body.landUse !== undefined ? body.landUse : cs.land_use,
       source_reference: body.sourceReference !== undefined ? body.sourceReference : cs.source_reference,
       proposed_upi: body.proposedUpi !== undefined ? body.proposedUpi : cs.proposed_upi,
+      correction_reason: body.correctionReason !== undefined ? body.correctionReason : cs.correction_reason,
+      area_m2_surveyed: body.areaM2Surveyed !== undefined ? body.areaM2Surveyed : cs.area_m2_surveyed,
     };
     await client.query(
-      'UPDATE lais.land_case SET land_category = $2, land_use = $3, source_reference = $4, proposed_upi = $5 WHERE id = $1',
-      [cs.id, next.land_category, next.land_use, next.source_reference, next.proposed_upi],
+      `UPDATE lais.land_case SET land_category = $2, land_use = $3, source_reference = $4, proposed_upi = $5,
+                                 correction_reason = $6, area_m2_surveyed = $7 WHERE id = $1`,
+      [cs.id, next.land_category, next.land_use, next.source_reference, next.proposed_upi, next.correction_reason, next.area_m2_surveyed],
     );
-    await recordEvent(client, cs.id, req.auth!.user.id, 'update_attributes', Object.keys(body).join(', '));
-    await writeAudit(req, { action: 'case.update_attributes', outcome: 'success', entityType: 'case', entityId: cs.id, caseId: cs.id, countyId: cs.county_id, detail: { fields: Object.keys(body) } }, client);
+    // Record only the fields whose value actually changed.
+    const asText = (v: unknown) => (v === null || v === undefined ? null : String(Number(v) || v));
+    const changed = (Object.keys(next) as (keyof typeof next)[]).filter((k) => asText(next[k]) !== asText(cs[k]));
+    if (changed.length > 0) {
+      await recordEvent(client, cs.id, req.auth!.user.id, 'update_attributes', changed.map((k) => k.replace(/_/g, ' ')).join(', '));
+      await writeAudit(req, { action: 'case.update_attributes', outcome: 'success', entityType: 'case', entityId: cs.id, caseId: cs.id, countyId: cs.county_id, detail: { fields: changed } }, client);
+    }
   });
   res.json({ ok: true });
 });

@@ -33,6 +33,7 @@ export const FEATURE_LIMITS: Record<string, { min: number; max: number; label: s
   first_registration: { min: 1, max: 1, label: 'A registration case takes exactly one parcel feature' },
   subdivision: { min: 2, max: 50, label: 'A subdivision takes between 2 and 50 new parcel features' },
   consolidation: { min: 1, max: 1, label: 'A consolidation takes exactly one merged parcel feature' },
+  correction: { min: 1, max: 1, label: 'A correction takes exactly one corrected parcel feature' },
 };
 
 /**

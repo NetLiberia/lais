@@ -37,8 +37,8 @@ export function CaseDetail() {
       label: `${many ? `New parcel ${f.index + 1}` : 'Proposed geometry'}${f.structural_ok ? ' (staging)' : ' (invalid)'}`,
     });
   }
-  if (data.parcel?.geometry && cs.case_type === 'transfer') {
-    overlays.push({ id: 'parcel', data: data.parcel.geometry, color: '#1f5fbf', label: `Published ${data.parcel.upi}` });
+  if (data.parcel?.geometry && (cs.case_type === 'transfer' || cs.case_type === 'correction')) {
+    overlays.push({ id: 'parcel', data: data.parcel.geometry, color: '#1f5fbf', dashed: cs.case_type === 'correction', label: `Published ${data.parcel.upi}` });
   }
   const resultLinks = data.children.length > 0 && (
     <> · created {data.children.map((c: any, i: number) => <span key={c.upi}>{i > 0 && ', '}<Link to={`/work/parcels/${c.upi}`}>{c.upi}</Link></span>)}</>
@@ -67,7 +67,9 @@ export function CaseDetail() {
           {data.sources.map((s: any) => (
             <CurrentRights key={s.upi} parcel={s} note="When this case is published the parcel is retired: all its current interests end, including encumbrances. Record on the new parcel(s) every interest that continues." />
           ))}
-          <Rights data={data} editable={can('case.edit_rights')} act={act} caseId={id!} featureCount={features.length} />
+          {cs.case_type === 'correction'
+            ? <Section title="Rights"><p className="small muted">A correction never changes who holds an interest. Use a transfer case for that.</p></Section>
+            : <Rights data={data} editable={can('case.edit_rights')} act={act} caseId={id!} featureCount={features.length} />}
           <Documents data={data} canUpload={can('case.upload_document')} act={act} caseId={id!} />
         </div>
         <div className="stack">
@@ -88,7 +90,8 @@ export function CaseDetail() {
                     </ul>
                   </div>
                 : <p className="small muted">
-                    {cs.case_type === 'subdivision' ? 'Import one GeoJSON file containing every new parcel (2 or more features).'
+                    {cs.case_type === 'correction' ? 'The boundary stays as published unless you import a corrected one.'
+                      : cs.case_type === 'subdivision' ? 'Import one GeoJSON file containing every new parcel (2 or more features).'
                       : cs.case_type === 'consolidation' ? 'Import the merged parcel as a single feature.'
                       : 'No geometry imported yet.'}
                   </p>}
@@ -128,6 +131,13 @@ export function CaseDetail() {
   );
 }
 
+/** For a correction, shows the published value beside a field when the case proposes something different. */
+function Was({ published, proposed }: { published: unknown; proposed: unknown }) {
+  const norm = (v: unknown) => (v === null || v === undefined || v === '' ? null : String(Number(v) || v));
+  if (norm(published) === norm(proposed)) return null;
+  return <span className="small changed"> (published: {published === null || published === undefined || published === '' ? '—' : String(published)})</span>;
+}
+
 function Attributes({ data, editable, onSave }: { data: any; editable: boolean; onSave: (b: object) => void }) {
   const cs = data.case;
   const [form, setForm] = useState({
@@ -135,46 +145,68 @@ function Attributes({ data, editable, onSave }: { data: any; editable: boolean; 
     landUse: cs.land_use ?? '',
     sourceReference: cs.source_reference ?? '',
     proposedUpi: cs.proposed_upi ?? '',
+    correctionReason: cs.correction_reason ?? '',
+    areaM2Surveyed: cs.area_m2_surveyed ?? '',
   });
   const registration = cs.case_type === 'first_registration';
+  const correction = cs.case_type === 'correction';
   const createsParcels = cs.case_type !== 'transfer';
+  // For a correction, the published values the case would change.
+  const pub = correction ? data.parcel : null;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const body: Record<string, unknown> = { sourceReference: form.sourceReference || null };
     if (createsParcels) Object.assign(body, { landCategory: form.landCategory || null, landUse: form.landUse || null });
     if (registration) Object.assign(body, { proposedUpi: form.proposedUpi || null });
+    if (correction) Object.assign(body, { correctionReason: form.correctionReason || null, areaM2Surveyed: form.areaM2Surveyed === '' ? null : Number(form.areaM2Surveyed) });
     onSave(body);
   };
+  const title = correction ? 'Corrected record' : 'Case details';
   if (!editable) {
     return (
-      <Section title="Case details">
+      <Section title={title}>
         <dl className="facts">
-          {createsParcels && <><dt>Land category</dt><dd>{human(cs.land_category)}</dd><dt>Land use</dt><dd>{cs.land_use ?? '—'}</dd></>}
+          {correction && <><dt>Reason</dt><dd>{cs.correction_reason ?? '—'}</dd></>}
+          {createsParcels && <>
+            <dt>Land category</dt><dd>{human(cs.land_category)}{pub && <Was published={pub.land_category} proposed={cs.land_category} />}</dd>
+            <dt>Land use</dt><dd>{cs.land_use ?? '—'}{pub && <Was published={pub.land_use} proposed={cs.land_use} />}</dd>
+          </>}
+          {correction && <><dt>Surveyed area</dt><dd>{cs.area_m2_surveyed ? `${Number(cs.area_m2_surveyed).toLocaleString()} m²` : '—'}<Was published={pub?.area_m2_surveyed} proposed={cs.area_m2_surveyed} /></dd></>}
           {registration && <><dt>Proposed identifier</dt><dd>{cs.proposed_upi ?? 'assigned at publication'}</dd></>}
-          <dt>Source reference</dt><dd>{cs.source_reference ?? '—'}</dd>
+          <dt>Source reference</dt><dd>{cs.source_reference ?? '—'}{pub && <Was published={pub.source_reference} proposed={cs.source_reference} />}</dd>
           <dt>Opened</dt><dd>{fmtDate(cs.created_at)}</dd>
         </dl>
       </Section>
     );
   }
   return (
-    <Section title="Case details">
+    <Section title={title}>
       <form onSubmit={submit} className="stack">
+        {correction && (
+          <label>What is wrong, and how was it established?
+            <textarea value={form.correctionReason} onChange={(e) => setForm({ ...form, correctionReason: e.target.value })} />
+          </label>
+        )}
         {createsParcels && (
           <>
-            <label>Land category{!registration && ' (of the new parcels)'}
+            <label>Land category{!registration && !correction && ' (of the new parcels)'}{pub && <Was published={pub.land_category} proposed={form.landCategory} />}
               <select value={form.landCategory} onChange={(e) => setForm({ ...form, landCategory: e.target.value })}>
                 <option value="">—</option><option value="private">Private</option><option value="customary">Customary</option>
                 <option value="government">Government</option><option value="public">Public</option>
               </select>
             </label>
-            <label>Land use<input value={form.landUse} onChange={(e) => setForm({ ...form, landUse: e.target.value })} /></label>
+            <label>Land use{pub && <Was published={pub.land_use} proposed={form.landUse} />}<input value={form.landUse} onChange={(e) => setForm({ ...form, landUse: e.target.value })} /></label>
           </>
+        )}
+        {correction && (
+          <label>Surveyed (legally recorded) area in m²{pub && <Was published={pub.area_m2_surveyed} proposed={form.areaM2Surveyed} />}
+            <input type="number" min="0" step="0.01" value={form.areaM2Surveyed} onChange={(e) => setForm({ ...form, areaM2Surveyed: e.target.value })} />
+          </label>
         )}
         {registration && (
           <label>Proposed identifier<input value={form.proposedUpi} placeholder="assigned at publication if blank" onChange={(e) => setForm({ ...form, proposedUpi: e.target.value.toUpperCase() })} /></label>
         )}
-        <label>Source reference<input value={form.sourceReference} onChange={(e) => setForm({ ...form, sourceReference: e.target.value })} /></label>
+        <label>Source reference{pub && <Was published={pub.source_reference} proposed={form.sourceReference} />}<input value={form.sourceReference} onChange={(e) => setForm({ ...form, sourceReference: e.target.value })} /></label>
         <button type="submit">Save details</button>
       </form>
     </Section>

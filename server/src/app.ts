@@ -24,10 +24,11 @@ export function createApp() {
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
 
-  // Public portal: no session, separate router, fixed public field list.
-  app.use('/api/public', publicRouter);
-
   app.use('/api', loadSession);
+
+  // Public portal: separate router and a fixed public field list. The session is only used to exempt
+  // signed-in staff from the anonymous rate limit; it never widens what these endpoints return.
+  app.use('/api/public', publicRouter);
   app.use('/api/auth', authRouter);
 
   // Everything else requires a fully authenticated session and a CSRF token on writes.

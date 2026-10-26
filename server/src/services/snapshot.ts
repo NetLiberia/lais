@@ -30,7 +30,7 @@ export async function computeSnapshot(db: Db, cs: CaseRow): Promise<string> {
        FROM lais.parcel p
       WHERE p.id = $2 OR p.id IN (SELECT parcel_id FROM lais.case_source_parcel WHERE case_id = $1)
       ORDER BY p.id`,
-    [cs.id, cs.case_type === 'transfer' ? cs.parcel_id : null],
+    [cs.id, cs.case_type === 'transfer' || cs.case_type === 'correction' ? cs.parcel_id : null],
   );
 
   const material = {
@@ -43,6 +43,8 @@ export async function computeSnapshot(db: Db, cs: CaseRow): Promise<string> {
       category: cs.land_category,
       use: cs.land_use,
       source: cs.source_reference,
+      correctionReason: cs.correction_reason,
+      surveyedArea: cs.area_m2_surveyed,
     },
     geometry: geometry.rows,
     rights: rights.rows,

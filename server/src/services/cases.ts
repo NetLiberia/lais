@@ -17,6 +17,8 @@ export interface CaseRow {
   land_category: string | null;
   land_use: string | null;
   source_reference: string | null;
+  correction_reason: string | null;
+  area_m2_surveyed: string | null;
   created_by: string;
   created_at: Date;
   updated_at: Date;

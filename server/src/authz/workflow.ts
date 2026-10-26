@@ -10,11 +10,13 @@ export const CASE_STATUSES = [
 ] as const;
 export type CaseStatus = (typeof CASE_STATUSES)[number];
 
-export const CASE_TYPES = ['first_registration', 'transfer', 'subdivision', 'consolidation'] as const;
+export const CASE_TYPES = ['first_registration', 'transfer', 'subdivision', 'consolidation', 'correction'] as const;
 export type CaseType = (typeof CASE_TYPES)[number];
 
-/** Case types that create new parcels from imported geometry. */
-export const SPATIAL_CASE_TYPES: readonly CaseType[] = ['first_registration', 'subdivision', 'consolidation'];
+/** Case types that accept imported geometry (a correction may optionally replace the boundary). */
+export const SPATIAL_CASE_TYPES: readonly CaseType[] = ['first_registration', 'subdivision', 'consolidation', 'correction'];
+/** Case types that propose rights. A correction never changes rights; those go through a transfer. */
+export const RIGHTS_CASE_TYPES: readonly CaseType[] = ['first_registration', 'transfer', 'subdivision', 'consolidation'];
 /** Case types that retire existing parcels and create new ones. */
 export const RESHAPING_CASE_TYPES: readonly CaseType[] = ['subdivision', 'consolidation'];
 

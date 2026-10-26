@@ -86,11 +86,11 @@ export function ParcelRecord() {
           )}
           <Section title="Versions">
             <table className="table">
-              <thead><tr><th>#</th><th>Category</th><th>Calculated area</th><th>Source</th><th>Valid</th><th>Published by</th></tr></thead>
+              <thead><tr><th>#</th><th>Category</th><th>Use</th><th>Calculated area</th><th>Source</th><th>Valid</th><th>Published by</th></tr></thead>
               <tbody>
                 {data.versions.map((v: any) => (
                   <tr key={v.id}>
-                    <td>{v.version_no}</td><td>{human(v.land_category)}</td>
+                    <td>{v.version_no}</td><td>{human(v.land_category)}</td><td>{v.land_use ?? '—'}</td>
                     <td>{Number(v.area_m2_calculated).toLocaleString()} m²{v.area_m2_surveyed && <div className="small">surveyed {Number(v.area_m2_surveyed).toLocaleString()} m²</div>}</td>
                     <td className="small">{v.source_reference}</td>
                     <td className="small">{fmtDate(v.valid_from)} – {v.valid_to ? fmtDate(v.valid_to) : 'current'}</td>
