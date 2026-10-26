@@ -134,6 +134,6 @@ tr.muted td { color: var(--muted); }
 .map-wrap { position: relative; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #e8ece9; }
 .main-map .map-wrap { border-radius: 0; border: none; }
 .map-message { position: absolute; z-index: 1000; top: 8px; left: 50%; transform: translateX(-50%); background: var(--surface); padding: 0.25rem 0.6rem; border-radius: 6px; font-size: 0.85rem; box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
-.map-legend { position: absolute; z-index: 1000; bottom: 8px; left: 8px; background: rgba(255,255,255,0.92); padding: 0.3rem 0.5rem; border-radius: 6px; font-size: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.6rem; max-width: calc(100% - 16px); }
+.map-legend { position: absolute; z-index: 1000; bottom: 26px; left: 8px; background: rgba(255,255,255,0.92); padding: 0.3rem 0.5rem; border-radius: 6px; font-size: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.6rem; max-width: calc(100% - 16px); }
 .map-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border-radius: 2px; vertical-align: middle; }
 .map-legend i.dashed { border: 2px dashed #555; background: transparent; }

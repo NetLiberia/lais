@@ -82,6 +82,8 @@ npm run dev:server     # terminal 1 → http://localhost:4000
 npm run dev:web        # terminal 2 → http://localhost:5173
 ```
 
+If another app already uses port 4000 or 5173, set `PORT=4100` in `server/.env` and start the web app with `LAIS_API_URL=http://localhost:4100` (and, if needed, `npx vite --port 5180` in `web/`). Vite will refuse a busy port, but on Windows a second server can sometimes share port 4000 with another app silently, so check that `/api/public/counties` returns a FeatureCollection.
+
 `npm run db:reset` drops and rebuilds the development database (it refuses to run when `NODE_ENV=production`).
 
 ### 4. Tests

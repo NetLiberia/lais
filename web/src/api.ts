@@ -35,7 +35,7 @@ export async function api<T = any>(path: string, opts: Options = {}): Promise<T>
   const data = isJson ? await res.json() : null;
   if (!res.ok) {
     const details = data?.details;
-    let message = data?.error ?? `Request failed (${res.status})`;
+    let message = typeof data?.error === 'string' ? data.error : `Request failed (${res.status})`;
     if (Array.isArray(details) && details[0]?.message) message += `: ${details.map((d: any) => `${d.path ? `${d.path} ` : ''}${d.message}`).join('; ')}`;
     throw new ApiError(res.status, message, details, data);
   }
