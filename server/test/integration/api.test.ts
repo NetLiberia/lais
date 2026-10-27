@@ -733,6 +733,64 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
       expect(result.status).toBe('returned');
       expect(codes(result).filter((c) => c === 'ALREADY_MIGRATED')).toHaveLength(10);
     });
+
+    describe('confirming documented interests', () => {
+      const upiOf = async (legacyRef: string) =>
+        (await pool.query('SELECT upi FROM lais.parcel WHERE legacy_ref = $1', [legacyRef])).rows[0].upi as string;
+
+      async function verifiedParty(name: string) {
+        const created = await as('proc.mo').post('/api/parties', { partyType: 'person', name, nationalIdRef: `SYN-ID-${name.length}` });
+        expect(created.status).toBe(201);
+        expect((await as('proc2.mo').post(`/api/parties/${created.body.id}/verify-identity`, { note: 'Synthetic ID card seen' })).status).toBe(200);
+        return created.body.id as string;
+      }
+
+      async function openConfirmation(upi: string) {
+        const created = await as('proc.mo').post('/api/cases', { caseType: 'confirmation', parcelUpi: upi, sourceReference: 'SYNTHETIC verification visit' });
+        expect(created.status).toBe(201);
+        const id = created.body.id as string;
+        const deed = await as('proc.mo').upload(`/api/cases/${id}/documents`, fixture('synthetic_document.pdf'), 'deed.pdf', { docType: 'deed', classification: 'restricted' });
+        await as('proc2.mo').post(`/api/cases/${id}/documents/${deed.body.id}/verify`, { status: 'verified', note: 'Original deed seen' });
+        return id;
+      }
+
+      it('refuses to confirm a parcel that already has a registered owner', async () => {
+        const id = await openConfirmation('PROV-MO-000002');
+        await as('proc.mo').post(`/api/cases/${id}/rights`, { partyId: await partyId('Hawa'), rrrType: 'ownership' });
+        expect(codes(await submit(id))).toContain('ALREADY_REGISTERED');
+      });
+
+      it('flags holders who differ from the legacy record', async () => {
+        const id = await openConfirmation(await upiOf('LR-MO-1987-0001'));
+        await as('proc.mo').post(`/api/cases/${id}/rights`, { partyId: await partyId('Hawa'), rrrType: 'ownership' });
+        const result = await submit(id);
+        expect(codes(result)).toEqual(expect.arrayContaining(['DOCUMENTED_HOLDER_NOT_CONFIRMED', 'HOLDER_NOT_IN_LEGACY_RECORD']));
+        await as('reg.mo').post(`/api/cases/${id}/decision`, { decision: 'returned', reason: 'Holder does not match the legacy record' });
+      });
+
+      it('registers verified co-owners and keeps the legacy record as history', async () => {
+        const upi = await upiOf('LR-MO-1987-0002');
+        const id = await openConfirmation(upi);
+        for (const name of ['Abraham Legacyname', 'Ruth Legacyname']) {
+          const partyIdValue = await verifiedParty(name);
+          expect((await as('proc.mo').post(`/api/cases/${id}/rights`, { partyId: partyIdValue, rrrType: 'co_ownership', shareNum: 1, shareDen: 2 })).status).toBe(201);
+        }
+        const result = await submit(id);
+        expect(result.status).toBe('under_review');
+        expect(codes(result)).not.toContain('HOLDER_NOT_IN_LEGACY_RECORD');
+        await acknowledgeAll(id);
+        expect((await approve(id)).status).toBe(200);
+        expect((await as('reg.mo').post(`/api/cases/${id}/publish`)).status).toBe(200);
+
+        const record = (await as('reg.mo').get(`/api/parcels/${upi}`)).body;
+        expect(record.currentRights.map((r: any) => [r.party_name, r.interest_status, `${r.share_num}/${r.share_den}`])).toEqual([
+          ['Abraham Legacyname', 'registered', '1/2'], ['Ruth Legacyname', 'registered', '1/2'],
+        ].sort());
+        expect(record.historicalRights.every((r: any) => r.interest_status === 'documented')).toBe(true);
+        expect(record.historicalRights).toHaveLength(2);
+        expect((await request(app).get(`/api/public/parcels/${upi}`)).body.properties.record_status).toBe('registered');
+      });
+    });
   });
 
   describe('documents and separation of duties', () => {

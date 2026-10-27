@@ -66,6 +66,7 @@ export function CaseDetail() {
         <div className="stack">
           <Attributes data={data} editable={can('case.edit_attributes')} onSave={(body) => act(() => api(`/cases/${id}`, { method: 'PATCH', body }))} />
           {cs.case_type === 'transfer' && data.parcel && <CurrentRights parcel={data.parcel} note="On publication, ownership-type interests end and the incoming interests below are registered. Encumbrances carry forward." />}
+          {cs.case_type === 'confirmation' && data.parcel && <CurrentRights parcel={data.parcel} note="These interests come from a legacy record and are unverified. On publication they end (kept as history) and the verified holders below are registered." />}
           {data.sources.map((s: any) => (
             <CurrentRights key={s.upi} parcel={s} note="When this case is published the parcel is retired: all its current interests end, including encumbrances. Record on the new parcel(s) every interest that continues." />
           ))}
@@ -225,7 +226,7 @@ function CurrentRights({ parcel, note }: { parcel: any; note: string }) {
       <ul className="plain">
         {parcel.current_rights.map((r: any, i: number) => (
           <li key={i} className={r.ended ? 'muted' : ''}>
-            {human(r.rrrType)}{r.share && ` ${r.share}`} — {r.partyName} <span className="muted">({r.partyType})</span>{r.ended && ' — ended by this case'}
+            {human(r.rrrType)}{r.share && ` ${r.share}`} — {r.partyName} <span className="muted">({r.partyType}{r.interestStatus && r.interestStatus !== 'registered' ? `, ${r.interestStatus}` : ''})</span>{r.ended && ' — ended by this case'}
           </li>
         ))}
       </ul>
@@ -274,7 +275,9 @@ function Rights({ data, editable, act, caseId, featureCount }: { data: any; edit
     if (subdivision) body.featureIndex = target;
     void act(() => api(`/cases/${caseId}/rights`, { body })).then(() => { setParty(null); setShare(''); });
   };
-  const title = data.case.case_type === 'transfer' ? 'Incoming rights holders' : subdivision ? 'Proposed rights on the new parcels' : 'Proposed rights';
+  const title = data.case.case_type === 'transfer' ? 'Incoming rights holders'
+    : data.case.case_type === 'confirmation' ? 'Verified holders to register'
+    : subdivision ? 'Proposed rights on the new parcels' : 'Proposed rights';
   return (
     <Section
       title={title}

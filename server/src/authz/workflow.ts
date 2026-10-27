@@ -10,7 +10,7 @@ export const CASE_STATUSES = [
 ] as const;
 export type CaseStatus = (typeof CASE_STATUSES)[number];
 
-export const CASE_TYPES = ['first_registration', 'transfer', 'subdivision', 'consolidation', 'correction', 'migration'] as const;
+export const CASE_TYPES = ['first_registration', 'transfer', 'subdivision', 'consolidation', 'correction', 'migration', 'confirmation'] as const;
 export type CaseType = (typeof CASE_TYPES)[number];
 
 /** Case types that accept imported geometry (a correction may optionally replace the boundary). */
@@ -19,7 +19,7 @@ export const SPATIAL_CASE_TYPES: readonly CaseType[] = ['first_registration', 's
  * Case types that propose rights. A correction never changes rights (those go through a transfer), and a
  * migration records the holders named in the legacy file as documented interests rather than proposals.
  */
-export const RIGHTS_CASE_TYPES: readonly CaseType[] = ['first_registration', 'transfer', 'subdivision', 'consolidation'];
+export const RIGHTS_CASE_TYPES: readonly CaseType[] = ['first_registration', 'transfer', 'subdivision', 'consolidation', 'confirmation'];
 /** Case types that retire existing parcels and create new ones. */
 export const RESHAPING_CASE_TYPES: readonly CaseType[] = ['subdivision', 'consolidation'];
 

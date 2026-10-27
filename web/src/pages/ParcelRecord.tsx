@@ -3,10 +3,12 @@ import { Link, useParams } from 'react-router-dom';
 import { api, CASE_TYPE_LABELS, fmtDate, human } from '../api';
 import { ParcelMap } from '../components/ParcelMap';
 import { ErrorBox, Section, StatusPill, useAction, useLoad } from '../components/ui';
+import { useAuth } from '../auth';
 
 /** Internal registry record. Every view is logged on the server. */
 export function ParcelRecord() {
   const { upi } = useParams();
+  const { hasRole } = useAuth();
   const { data, error, reload } = useLoad(() => api(`/parcels/${upi}`), [upi]);
   const action = useAction();
   const [reason, setReason] = useState('');
@@ -72,6 +74,9 @@ export function ParcelRecord() {
             {data.currentRights.some((r: any) => r.interest_status !== 'registered') && (
               <div className="alert info small">
                 Interests marked <strong>documented</strong> are names copied from a legacy record. They have not been verified or registered.
+                {hasRole('processor') && !retired && (
+                  <> <Link to={`/work/cases/new?type=confirmation&upi=${data.parcel.upi}`}>Confirm these interests</Link></>
+                )}
               </div>
             )}
             <p className="small muted">This is the record held by LAIS. A record match is not by itself a legal determination of ownership.</p>
@@ -79,11 +84,11 @@ export function ParcelRecord() {
           {data.historicalRights.length > 0 && (
             <Section title="Previous interests">
               <table className="table">
-                <thead><tr><th>Holder</th><th>Interest</th><th>From</th><th>To</th><th>Ended by</th></tr></thead>
+                <thead><tr><th>Holder</th><th>Interest</th><th>Status</th><th>From</th><th>To</th><th>Ended by</th></tr></thead>
                 <tbody>
                   {data.historicalRights.map((r: any) => (
                     <tr key={r.id}>
-                      <td>{r.party_name}</td><td>{human(r.rrr_type)}</td>
+                      <td>{r.party_name}</td><td>{human(r.rrr_type)}</td><td>{r.interest_status}</td>
                       <td className="small">{fmtDate(r.valid_from)}</td><td className="small">{fmtDate(r.valid_to)}</td>
                       <td className="small">{r.ended_by_case}</td>
                     </tr>

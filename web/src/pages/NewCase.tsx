@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../auth';
 import { ErrorBox, useAction } from '../components/ui';
 
-type CaseType = 'first_registration' | 'transfer' | 'subdivision' | 'consolidation' | 'correction' | 'migration';
+type CaseType = 'first_registration' | 'transfer' | 'subdivision' | 'consolidation' | 'correction' | 'migration' | 'confirmation';
 
 const TYPES: { value: CaseType; label: string; hint: string }[] = [
   { value: 'first_registration', label: 'First registration', hint: 'Record a parcel that is not yet in the register.' },
@@ -13,6 +13,7 @@ const TYPES: { value: CaseType; label: string; hint: string }[] = [
   { value: 'consolidation', label: 'Consolidation', hint: 'Merge two or more published parcels into one.' },
   { value: 'correction', label: 'Correction', hint: 'Fix an error in a published boundary or record. Rights are not changed.' },
   { value: 'migration', label: 'Legacy migration', hint: 'Bring a batch of parcels from an existing register or GIS layer into LAIS.' },
+  { value: 'confirmation', label: 'Confirmation', hint: 'Register verified holders of a parcel whose interests are only documented (e.g. after migration).' },
 ];
 
 /** Splits a list of identifiers typed with commas, spaces or new lines. */
@@ -21,18 +22,21 @@ const parseUpis = (text: string) => text.split(/[\s,;]+/).map((s) => s.trim().to
 export function NewCase() {
   const { session } = useAuth();
   const navigate = useNavigate();
+  // Allows links such as /work/cases/new?type=confirmation&upi=PROV-MO-001000
+  const [params] = useSearchParams();
+  const presetType = TYPES.some((t) => t.value === params.get('type')) ? (params.get('type') as CaseType) : null;
   const counties = (session?.grants ?? [])
     .filter((g) => (g.role === 'gis_officer' || g.role === 'processor') && g.county)
     .map((g) => g.county!);
   const uniqueCounties = [...new Map(counties.map((c) => [c.id, c])).values()];
 
-  const [caseType, setCaseType] = useState<CaseType>('first_registration');
+  const [caseType, setCaseType] = useState<CaseType>(presetType ?? 'first_registration');
   const [countyId, setCountyId] = useState<number>(uniqueCounties[0]?.id ?? 0);
   const [landCategory, setLandCategory] = useState('private');
   const [landUse, setLandUse] = useState('');
   const [sourceReference, setSourceReference] = useState('');
   const [proposedUpi, setProposedUpi] = useState('');
-  const [parcelUpi, setParcelUpi] = useState('');
+  const [parcelUpi, setParcelUpi] = useState(params.get('upi')?.toUpperCase() ?? '');
   const [parcelUpis, setParcelUpis] = useState('');
   const [correctionReason, setCorrectionReason] = useState('');
   const { busy, error, run } = useAction();
@@ -49,7 +53,7 @@ export function NewCase() {
           ? { caseType, parcelUpis: parseUpis(parcelUpis), sourceReference: reference }
           : caseType === 'correction'
             ? { caseType, parcelUpi: parcelUpi.trim(), correctionReason: correctionReason || undefined }
-            : { caseType, parcelUpi: parcelUpi.trim(), sourceReference: reference };
+            : { caseType, parcelUpi: parcelUpi.trim(), sourceReference: reference }; // transfer, subdivision, confirmation
     let id = '';
     if (await run(async () => { id = (await api<{ id: string }>('/cases', { body })).id; })) navigate(`/work/cases/${id}`);
   };
@@ -98,7 +102,7 @@ export function NewCase() {
             </label>
           </>
         )}
-        {(caseType === 'transfer' || caseType === 'subdivision' || caseType === 'correction') && (
+        {(caseType === 'transfer' || caseType === 'subdivision' || caseType === 'correction' || caseType === 'confirmation') && (
           <label>Published parcel identifier<input value={parcelUpi} onChange={(e) => setParcelUpi(e.target.value.toUpperCase())} placeholder="PROV-MO-000001" required /></label>
         )}
         {caseType === 'consolidation' && (

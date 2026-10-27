@@ -30,7 +30,7 @@ export async function computeSnapshot(db: Db, cs: CaseRow): Promise<string> {
        FROM lais.parcel p
       WHERE p.id = $2 OR p.id IN (SELECT parcel_id FROM lais.case_source_parcel WHERE case_id = $1)
       ORDER BY p.id`,
-    [cs.id, cs.case_type === 'transfer' || cs.case_type === 'correction' ? cs.parcel_id : null],
+    [cs.id, ['transfer', 'correction', 'confirmation'].includes(cs.case_type) ? cs.parcel_id : null],
   );
 
   const material = {

@@ -84,6 +84,7 @@ export const CASE_TYPE_LABELS: Record<string, string> = {
   consolidation: 'Consolidation',
   correction: 'Correction',
   migration: 'Legacy migration',
+  confirmation: 'Confirmation',
 };
 
 export const human = (s: string | null | undefined) => (s ? s.replace(/_/g, ' ') : '—');

@@ -70,7 +70,9 @@ export async function publishApprovedCase(
 
   const result = cs.case_type === 'first_registration'
     ? await publishRegistration(client, cs)
-    : cs.case_type === 'transfer'
+    // A confirmation publishes like a transfer: the documented ownership interests end and the
+    // verified holders are registered. Encumbrances, if any, carry forward.
+    : cs.case_type === 'transfer' || cs.case_type === 'confirmation'
       ? await publishTransfer(client, cs)
       : cs.case_type === 'correction'
         ? await publishCorrection(client, cs)

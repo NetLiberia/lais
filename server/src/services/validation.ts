@@ -41,6 +41,8 @@ export async function evaluateCase(db: Db, cs: CaseRow): Promise<Evaluation> {
     batchId = await registrationChecks(db, cs, findings);
   } else if (cs.case_type === 'transfer') {
     landCategory = await transferChecks(db, cs, findings);
+  } else if (cs.case_type === 'confirmation') {
+    landCategory = await confirmationChecks(db, cs, findings);
   } else if (cs.case_type === 'correction') {
     batchId = await correctionChecks(db, cs, findings);
   } else if (cs.case_type === 'migration') {
@@ -316,6 +318,61 @@ async function competingCaseWarnings(db: Db, cs: CaseRow, parcelIds: string[], o
   }
 }
 
+/** Lower-cased, single-spaced name for comparing a legacy record with a verified party. */
+const normaliseName = (n: string) => n.toLowerCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * Confirmation of documented interests (for example from a legacy migration). The holders to be
+ * registered must be verified parties with valid shares; names that differ from the legacy record are
+ * flagged for the registrar rather than matched or rejected automatically.
+ */
+async function confirmationChecks(db: Db, cs: CaseRow, out: Finding[]): Promise<string | null> {
+  const { rows: [parcel] } = await db.query(
+    `SELECT p.id, p.upi, p.status, p.county_id, v.land_category
+       FROM lais.parcel p JOIN lais.parcel_version v ON v.id = p.current_version_id AND v.valid_to IS NULL
+      WHERE p.id = $1`,
+    [cs.parcel_id],
+  );
+  if (!parcel) {
+    out.push(err('PARCEL_NOT_FOUND', 'The parcel has no current published version'));
+    return null;
+  }
+  parcelStateChecks(parcel, cs, 'confirmation', out);
+  await competingCaseWarnings(db, cs, [parcel.id], out);
+
+  const { rows: current } = await db.query(
+    `SELECT r.interest_status, pa.name FROM lais.rrr r JOIN lais.party pa ON pa.id = r.party_id
+      WHERE r.parcel_id = $1 AND r.valid_to IS NULL AND r.rrr_type = ANY($2)`,
+    [parcel.id, OWNERSHIP_TYPES],
+  );
+  if (current.some((r) => r.interest_status === 'registered')) {
+    out.push(err('ALREADY_REGISTERED', `Parcel ${parcel.upi} already has a registered owner; use a transfer to change it`, { relatedParcelId: parcel.id }));
+  }
+  const documented = current.filter((r) => r.interest_status === 'documented' || r.interest_status === 'claimed');
+  if (documented.length === 0) {
+    out.push(err('NOTHING_TO_CONFIRM', `Parcel ${parcel.upi} has no documented ownership interests to confirm`, { relatedParcelId: parcel.id }));
+    return parcel.land_category;
+  }
+
+  const { rows: proposed } = await db.query(
+    'SELECT pa.name FROM lais.case_right_proposal r JOIN lais.party pa ON pa.id = r.party_id WHERE r.case_id = $1 AND r.rrr_type = ANY($2)',
+    [cs.id, OWNERSHIP_TYPES],
+  );
+  const proposedNames = new Set(proposed.map((p) => normaliseName(p.name)));
+  const documentedNames = new Set(documented.map((d) => normaliseName(d.name)));
+  for (const d of documented) {
+    if (proposed.length > 0 && !proposedNames.has(normaliseName(d.name))) {
+      out.push(warn('DOCUMENTED_HOLDER_NOT_CONFIRMED', `"${d.name}" is named in the legacy record but is not among the holders to be registered`, { relatedParcelId: parcel.id, detail: { name: d.name } }));
+    }
+  }
+  for (const p of proposed) {
+    if (!documentedNames.has(normaliseName(p.name))) {
+      out.push(warn('HOLDER_NOT_IN_LEGACY_RECORD', `"${p.name}" is to be registered but is not named in the legacy record`, { relatedParcelId: parcel.id, detail: { name: p.name } }));
+    }
+  }
+  return parcel.land_category;
+}
+
 /** Returns the parcel's current land category, for category/right consistency checks. */
 async function transferChecks(db: Db, cs: CaseRow, out: Finding[]): Promise<string | null> {
   const { rows: [parcel] } = await db.query(
@@ -534,6 +591,8 @@ async function rightsChecks(db: Db, cs: CaseRow, landCategory: string | null, ou
   if (rows.length === 0) {
     out.push(err('NO_PROPOSED_RIGHTS', cs.case_type === 'transfer'
       ? 'Record the incoming rights holder(s) for this transfer'
+      : cs.case_type === 'confirmation'
+        ? 'Record the verified holder(s) to be registered'
       : cs.case_type === 'subdivision'
         ? 'Record the rights holder(s) for each new parcel'
         : 'Record at least one rights holder for this parcel'));
@@ -586,6 +645,10 @@ async function documentChecks(db: Db, cs: CaseRow, out: Finding[], hasGeometry: 
     }
   } else if (cs.case_type === 'transfer') {
     if (!verified('deed')) out.push(err('MISSING_TRANSFER_DEED', 'A verified transfer deed is required'));
+  } else if (cs.case_type === 'confirmation') {
+    if (!['deed', 'customary_certificate', 'other'].some(verified)) {
+      out.push(err('MISSING_EVIDENCE_OF_INTEREST', 'Verified evidence of the interest (deed, customary land certificate or other legally recognised evidence) is required'));
+    }
   } else if (cs.case_type === 'migration') {
     if (!docs.some((d) => d.verification_status === 'verified')) {
       out.push(err('MISSING_MIGRATION_SOURCE', 'Attach and verify the source of the batch (register extract, dataset description or migration authorization)'));

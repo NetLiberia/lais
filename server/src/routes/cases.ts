@@ -96,6 +96,11 @@ const createBody = z.discriminatedUnion('caseType', [
     sourceReference: z.string().max(200).optional(),
   }),
   z.object({
+    caseType: z.literal('confirmation'),
+    parcelUpi: z.string().min(1).max(40),
+    sourceReference: z.string().max(200).optional(),
+  }),
+  z.object({
     caseType: z.literal('migration'),
     countyId: z.number().int(),
     sourceReference: z.string().max(200).optional(),
@@ -147,7 +152,7 @@ casesRouter.post('/', async (req, res) => {
       if (retired.length) throw conflict(`Parcel ${retired.map((p) => p.upi).join(', ')} is retired`);
       if (new Set(parcels.map((p) => p.county_id)).size > 1) throw badRequest('All parcels in a case must be in the same county');
       countyId = parcels[0].county_id;
-      if (body.caseType === 'transfer') {
+      if (body.caseType === 'transfer' || body.caseType === 'confirmation') {
         parcelId = parcels[0].id;
       } else if (body.caseType === 'correction') {
         // A correction starts from the current record; officers change only what is wrong.
@@ -334,8 +339,8 @@ const attributesBody = z.object({
 casesRouter.patch('/:id', async (req, res) => {
   const body = attributesBody.parse(req.body);
   await inCaseTx(req, 'case.edit_attributes', async (client, cs) => {
-    if (cs.case_type === 'transfer' && (body.landCategory !== undefined || body.landUse !== undefined || body.proposedUpi !== undefined)) {
-      throw badRequest('A transfer does not change the parcel category, land use or identifier');
+    if ((cs.case_type === 'transfer' || cs.case_type === 'confirmation') && (body.landCategory !== undefined || body.landUse !== undefined || body.proposedUpi !== undefined)) {
+      throw badRequest('This case changes interests only, not the parcel category, land use or identifier');
     }
     if (cs.case_type === 'migration' && (body.landCategory !== undefined || body.landUse !== undefined)) {
       throw badRequest('In a migration, land category and use come from each feature in the file');
