@@ -61,13 +61,33 @@ The record inspector in GIS review leaves out imported attributes whose names su
 
 By default the API connects as `lais_owner`, the role that owns the schemas and runs migrations.
 
-`server/db/roles.sql` is an optional hardening script, run once by a superuser after migrating. It creates a separate runtime login, `lais_app`, which:
+`server/db/roles.sql` is an optional hardening script, run by a superuser after migrating. It creates a separate runtime login, `lais_app`, which:
 
 - cannot change table structure or disable triggers;
 - cannot UPDATE or DELETE audit events or published history;
-- has read-only access to the migration history, so that backups still work.
+- has read-only access to the migration history and sequence values, so that administrator backups still work.
 
-**Status: unverified.** The script predates the administrator features. It grants on all tables that exist when it is run, but it has not been re-run or tested against migration 009.
+Grants apply to the tables that exist when the script runs, so **re-run it after every migration or database rebuild**. It is safe to re-run: an existing `lais_app` keeps its password.
+
+```powershell
+$env:PGPASSWORD = '<postgres password>'
+& 'C:\Program Files\PostgreSQL\18\bin\psql.exe' -h localhost -U postgres -d lais -v ON_ERROR_STOP=1 -v app_password="'<new lais_app password>'" -f server\db\roles.sql
+$env:PGPASSWORD = $null
+```
+
+Then set `DATABASE_URL=postgres://lais_app:<password>@localhost:5432/lais` in `server/.env` and restart the API. Keep `lais_owner` for migrations: `npm run db:migrate` must run as the owner.
+
+**Verified on 27 October 2026** (PostgreSQL 18.6, migrations up to 010):
+
+- The API ran as `lais_app` through three browser walkthroughs (administrator, registration end to end, supervisor). Each ran on a freshly rebuilt database with the script re-applied.
+- Every operation worked, including publication, audit writes, notifications, tasks, escalations and an administrator backup.
+
+The verification found and fixed two problems:
+
+- backups failed because the login could use sequences but not read their values;
+- the script could not be re-run because it always tried to create the role.
+
+A failed backup now also removes its partial file.
 
 ## Row-level security
 

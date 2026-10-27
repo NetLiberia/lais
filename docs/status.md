@@ -53,7 +53,9 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 - System Health from live checks: database, PostGIS, API, GIS queue, storage, latest backup, security events and audit-chain integrity. Background jobs are honestly reported as *unknown*.
 - Allow-listed settings, including the portal banner shown to staff.
 - Document categories: add, and activate or deactivate. System categories are protected. The case upload form lists the active categories, so new ones are offered to staff at once.
-- Backups: `pg_dump` from the interface, recorded with SHA-256, and a restore check.
+- Backups: `pg_dump` from the interface, recorded with SHA-256, and a restore check. A failed backup leaves no partial file.
+- Least-privilege database login (`server/db/roles.sql`, `lais_app`): verified by running the API as `lais_app` through the administrator, registration and supervisor walkthroughs, backup included.
+- An "Escalations for administration" card on the admin dashboard counts open escalations routed to system administration.
 - Reports as CSV: staff accounts, land applications (metadata only), GIS import jobs and county configuration. Each export is audited.
 
 **Platform**
@@ -137,7 +139,6 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 | Workload by leave or complexity | Not recorded, so the workload view states that raw counts are not a performance measure. |
 | PDF export | Through the browser's print dialog. No server-generated PDF. |
 | Stale-version detection as a conflict category | No validation rule flags it. A changed record is caught at publication by the decision snapshot, which returns the case for review. |
-| Escalation assignment for national system administration | Administrators can view and act on escalations routed to them under Escalations, but there is no dedicated admin dashboard card. |
 
 ## Partial
 
@@ -165,7 +166,6 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 | Item | Why |
 |---|---|
 | Docker Compose (`docker-compose.yml`, `Dockerfile`, `deploy/nginx.conf`) | No Docker on the development machine; never built or run. |
-| `server/db/roles.sql` with migration 009 | Needs a superuser run, which wasn't done for this phase. |
 | Production mode | Needs HTTPS termination and a hosting environment. |
 | Performance at national scale | Not load-tested. |
 | Browsers other than Edge | The walkthroughs drive Microsoft Edge (Chromium) only. |

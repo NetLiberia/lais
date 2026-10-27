@@ -49,6 +49,9 @@ adminOpsRouter.get('/dashboard/summary', async (req, res) => {
        (SELECT count(*)::int FROM staging.batch b
           LEFT JOIN LATERAL (SELECT error_count FROM staging.validation_run v WHERE v.batch_id = b.id ORDER BY run_at DESC LIMIT 1) r ON true
          WHERE b.status = 'active' AND (r.error_count IS NULL OR r.error_count > 0)) AS gis_jobs_attention,
+       -- Escalations routed to system administration and not yet closed (sync failures, access incidents, suspected changes).
+       (SELECT count(*)::int FROM lais.escalation WHERE responsible_role = 'system_admin' AND status <> 'closed') AS escalations_for_admin,
+       (SELECT count(*)::int FROM lais.escalation WHERE responsible_role = 'system_admin' AND status = 'open') AS escalations_unacknowledged,
        (SELECT count(*)::int FROM lais.county WHERE enabled) AS counties_enabled,
        (SELECT count(*)::int FROM lais.county) AS counties_total`,
     [OPEN],
@@ -731,6 +734,8 @@ adminOpsRouter.post('/backups', async (req, res) => {
     res.status(201).json({ id: run.id, status: 'succeeded', fileName, sizeBytes: stat.size, sha256 });
   } catch (err) {
     const message = (err as Error).message.slice(0, 1000);
+    // A failed pg_dump can leave a partial file; remove it so it is never mistaken for a backup.
+    await fs.rm(file, { force: true }).catch(() => undefined);
     await pool.query(`UPDATE lais.backup_run SET status = 'failed', finished_at = now(), error = $2 WHERE id = $1`, [run.id, message]);
     await writeAudit(req, { action: 'backup.run', outcome: 'failure', entityType: 'backup', entityId: run.id, detail: { reason, error: message } });
     log('error', 'backup failed', { requestId: req.requestId, error: message });

@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { AlertOctagon, FileClock, FolderKanban, Layers, MailQuestion, Map, RefreshCw, Users } from 'lucide-react';
+import { AlertOctagon, FileClock, FolderKanban, Layers, MailQuestion, Map, RefreshCw, Siren, Users } from 'lucide-react';
 import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { Badge, EmptyState, fmtDateTime, fmtDay, Panel, QueryState, StatCard } from '../../components/kit';
@@ -13,6 +13,7 @@ import { ChartFrame, colorFor, label } from '../../components/charts';
 interface Summary {
   active_staff: number; pending_activations: number; applications_total: number; applications_open: number; applications_under_review: number;
   parcels_published: number; parcels_in_staging: number; conflicts_open: number; gis_jobs_attention: number; counties_enabled: number; counties_total: number;
+  escalations_for_admin: number; escalations_unacknowledged: number;
 }
 interface Charts {
   range: { from: string; to: string };
@@ -86,6 +87,10 @@ export function AdminDashboard() {
             <StatCard label="Parcels in staging" value={s.parcels_in_staging} icon={<Layers size={18} />} description="Imported parcel geometries in open cases, awaiting validation or review" onClick={() => navigate('/admin/gis-sync?status=awaiting_validation')} />
             <StatCard label="Open spatial conflicts" value={s.conflicts_open} icon={<AlertOctagon size={18} />} tone={s.conflicts_open ? 'warn' : 'ok'} description="Conflict findings not yet acknowledged by a registrar" onClick={() => navigate('/admin/conflicts?status=open')} />
             <StatCard label="GIS jobs needing attention" value={s.gis_jobs_attention} icon={<RefreshCw size={18} />} tone={s.gis_jobs_attention ? 'danger' : 'ok'} description="Active imports that failed validation or have not been validated" onClick={() => navigate('/admin/gis-sync')} />
+            <StatCard label="Escalations for administration" value={s.escalations_for_admin} icon={<Siren size={18} />}
+              tone={s.escalations_unacknowledged ? 'danger' : s.escalations_for_admin ? 'warn' : 'ok'}
+              description={s.escalations_unacknowledged ? `${s.escalations_unacknowledged} not yet acknowledged: sync, access or data-change incidents` : 'Sync, access-control and data-change incidents routed to you'}
+              onClick={() => navigate('/escalations')} />
           </div>
         )}
       </QueryState>

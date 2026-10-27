@@ -36,9 +36,9 @@ const admin = await signIn('admin');
 
 await check('dashboard: cards, charts, activity and health load from the API', async () => {
   await admin.getByRole('heading', { name: /^Welcome/ }).waitFor();
-  await admin.locator('.stat-card').nth(7).waitFor();
+  await admin.locator('.stat-card').nth(8).waitFor();
   const cards = await admin.locator('.stat-card').count();
-  if (cards !== 8) throw new Error(`expected 8 cards, saw ${cards}`);
+  if (cards !== 9) throw new Error(`expected 9 cards, saw ${cards}`);
   const published = await admin.locator('.stat-card', { hasText: 'Published parcels' }).locator('.stat-value').innerText();
   if (published !== '15') throw new Error(`published parcels card shows ${published}, database has 15`);
   await admin.locator('.chart-grid .panel').nth(5).waitFor();
