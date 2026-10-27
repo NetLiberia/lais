@@ -8,6 +8,8 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 |---|---|
 | `npm test`: unit tests (policy, workflow, helpers, CSV safety, permission document) | 42 passed |
 | `npm test`: integration tests against a real PostgreSQL + PostGIS database | 93 passed |
+| `npm test`: web component tests (shared dialogs and tables, permission-aware navigation, account creation) in jsdom | 18 passed |
+| `npm run lint` (ESLint with typescript-eslint and the React hooks rules) | 0 errors; 91 warnings, all `no-explicit-any` in the older staff pages |
 | `npm run e2e`: browser walkthroughs in Microsoft Edge (7 scripts) | 80 steps passed, 0 problems |
 | `npm run backup:verify` on a backup taken through the interface | Restored and verified (see [backup-restore.md](backup-restore.md)) |
 | `npm run typecheck`, `npm run build` | Clean |
@@ -66,8 +68,8 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 | Item | What is missing |
 |---|---|
 | OpenAPI | Operations, parameters, security and error responses are described. Request and response bodies are not described field by field; they are enforced by Zod schemas in the code. |
-| Front-end tests | Covered by the browser walkthroughs; there are no component-level unit tests. |
-| Linting | ESLint is not configured. TypeScript runs in strict mode instead. |
+| Front-end component tests | Cover the shared kit, the shell navigation and user management. The other pages rely on the browser walkthroughs. |
+| Type strictness | The older staff pages (cases, parcels, parties, document requests) still use `any` for API responses: 91 lint warnings. |
 | Styling | Plain CSS with design tokens rather than Tailwind (documented in [architecture.md](architecture.md)). |
 | Backups | On demand only. No schedule, no off-host copy, no encryption at rest. Document files are not included. |
 | MFA | Available for every account; compulsory for privileged roles only when `MFA_ENFORCED=true`. |

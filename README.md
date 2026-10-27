@@ -121,6 +121,14 @@ npm test
 
 Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 135 tests in about 26 seconds with the default 10-connection pool.
 
+`npm test` also runs **18 web component tests** (Vitest, Testing Library, jsdom). They cover:
+- the shared dialogs: a reason is required, server refusals are shown, and focus stays where the user is typing;
+- tables and paging;
+- the navigation each role sees;
+- the create-account form: county rules, no surveyor role, no password field, and a one-time link.
+
+`npm run lint` runs ESLint over the API, the web app and the walkthroughs.
+
 **Browser walkthroughs.** With the API and web app running, `npm run e2e` drives Microsoft Edge through seven scripted journeys: registration, subdivision, document requests, corrections, legacy migration, confirmation, and the administrator dashboard. It resets the development database before each one. Set `LAIS_WEB_URL` if the web app is not on port 5173, and `BROWSER_PATH` for another Chromium browser. Screenshots go to `e2e/shots/`. Last run: 80 steps, 0 problems.
 
 **Backups.** `npm run backup:verify -w server -- <file>` restores a backup into `TEST_DATABASE_URL` and checks it (see [docs/backup-restore.md](docs/backup-restore.md)).

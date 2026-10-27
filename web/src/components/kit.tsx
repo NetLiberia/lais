@@ -40,6 +40,10 @@ export const useToast = () => useContext(ToastContext);
 
 function useDialogFocus(open: boolean, onClose: () => void) {
   const ref = useRef<HTMLDivElement>(null);
+  // Callers usually pass an inline onClose. Reading it through a ref keeps the effect below tied to
+  // opening and closing only; otherwise every re-render would move focus back to the first field.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
   useEffect(() => {
     if (!open) return;
     const opener = document.activeElement as HTMLElement | null;
@@ -48,7 +52,7 @@ function useDialogFocus(open: boolean, onClose: () => void) {
       .filter((el) => !el.hasAttribute('disabled'));
     (focusable().find((el) => el.matches('input, select, textarea')) ?? focusable()[0] ?? panel)?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+      if (e.key === 'Escape') { e.stopPropagation(); onCloseRef.current(); }
       if (e.key === 'Tab') {
         const els = focusable();
         if (els.length === 0) return;
@@ -59,7 +63,7 @@ function useDialogFocus(open: boolean, onClose: () => void) {
     };
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('keydown', onKey); opener?.focus?.(); };
-  }, [open, onClose]);
+  }, [open]);
   return ref;
 }
 

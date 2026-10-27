@@ -12,12 +12,18 @@
     "db:migrate": "npm run migrate -w server",
     "db:seed": "npm run seed -w server",
     "db:reset": "npm run reset -w server",
-    "test": "npm test -w server",
+    "test": "npm test -w server && npm test -w web",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
     "build": "npm run build -w web",
-    "e2e": "node e2e/run-all.mjs"
+    "e2e": "node e2e/run-all.mjs",
+    "lint": "eslint ."
   },
   "devDependencies": {
-    "playwright-core": "^1.64.1"
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.13.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
+    "playwright-core": "^1.64.1",
+    "typescript-eslint": "^8.72.1"
   }
 }

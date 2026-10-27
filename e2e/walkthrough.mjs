@@ -1,7 +1,6 @@
 // Drives the README walkthrough in Edge across roles. Usage: node walkthrough.mjs
 import { chromium } from 'playwright-core';
 import { BASE, BROWSER, FIX, PASSWORD, SHOTS } from './config.mjs';
-import path from 'node:path';
 
 const problems = [];
 let step = 0;

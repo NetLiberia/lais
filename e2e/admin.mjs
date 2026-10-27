@@ -1,7 +1,7 @@
 // Browser walkthrough of the Administrator Dashboard phase: every interactive element is exercised
 // against the real API and database, and the result checked.
 import { chromium } from 'playwright-core';
-import { BASE, BROWSER, FIX, PASSWORD, SHOTS } from './config.mjs';
+import { BASE, BROWSER, PASSWORD, SHOTS } from './config.mjs';
 import fs from 'node:fs';
 
 const problems = [];

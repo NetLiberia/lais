@@ -105,7 +105,7 @@ export function CaseDetail() {
             {can('case.import_geometry') && <GeometryImport caseId={id!} act={act} />}
           </Section>
           <Validation data={data} act={act} caseId={id!} canValidate={can('case.validate')} canAcknowledge={can('case.acknowledge_finding')} />
-          <Actions data={data} act={act} caseId={id!} can={can} />
+          <Actions act={act} caseId={id!} can={can} />
         </div>
       </div>
 
@@ -468,7 +468,7 @@ function Validation({ data, act, caseId, canValidate, canAcknowledge }: { data: 
   );
 }
 
-function Actions({ data, act, caseId, can }: { data: any; act: (fn: () => Promise<unknown>) => Promise<void>; caseId: string; can: (a: string) => boolean }) {
+function Actions({ act, caseId, can }: { act: (fn: () => Promise<unknown>) => Promise<void>; caseId: string; can: (a: string) => boolean }) {
   const [decision, setDecision] = useState('approved');
   const [reason, setReason] = useState('');
   const [authorityBasis, setAuthorityBasis] = useState('');
