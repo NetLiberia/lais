@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -8,6 +8,7 @@ import { AlertOctagon, FileClock, FolderKanban, Layers, MailQuestion, Map, Refre
 import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { Badge, EmptyState, fmtDateTime, fmtDay, Panel, QueryState, StatCard } from '../../components/kit';
+import { ChartFrame, colorFor, label } from '../../components/charts';
 
 interface Summary {
   active_staff: number; pending_activations: number; applications_total: number; applications_open: number; applications_under_review: number;
@@ -28,16 +29,6 @@ interface ActivityEvent {
 }
 interface County { id: number; code: string; name: string; enabled: boolean }
 
-/** Colours chosen to stay legible in light and dark themes. */
-const PALETTE = ['#2f7d5b', '#3b6fb6', '#c08a1e', '#8a5cc2', '#c4513f', '#3a9aa3', '#7a8a3a', '#b45a8c'];
-const STATUS_COLORS: Record<string, string> = {
-  published: '#2f7d5b', approved: '#3a9aa3', under_review: '#3b6fb6', draft: '#7d8794', returned: '#c08a1e', validating: '#8a5cc2',
-  rejected: '#c4513f', withdrawn: '#a3a9b1', open: '#c08a1e', acknowledged: '#3b6fb6', closed: '#7d8794',
-  'passed validation': '#3a9aa3', 'failed validation': '#c4513f', 'awaiting validation': '#3b6fb6', superseded: '#a3a9b1',
-};
-const colorFor = (k: string, i: number) => STATUS_COLORS[k] ?? PALETTE[i % PALETTE.length];
-const label = (s: string) => s.replace(/_/g, ' ');
-
 const ACTION_LABELS: Record<string, string> = {
   'admin.user_create': 'Staff account created', 'admin.role_grant': 'Role assigned', 'admin.role_revoke': 'Role revoked',
   'admin.user_status': 'Account status changed', 'admin.password_reset_initiated': 'Password reset started', 'auth.account_activated': 'Account activated',
@@ -47,19 +38,6 @@ const ACTION_LABELS: Record<string, string> = {
   'county.boundary_verify': 'County boundary verified', 'settings.update': 'Setting changed', 'document_category.update': 'Document category changed',
   'document_category.create': 'Document category added', 'backup.run': 'Backup',
 };
-
-/** A chart with an accessible caption and a "show data" table alternative. */
-function ChartFrame({ title, description, table, children, empty }: { title: string; description: string; table: ReactNode; children: ReactNode; empty: boolean }) {
-  const [showTable, setShowTable] = useState(false);
-  return (
-    <Panel title={title} actions={!empty && <button className="link small" onClick={() => setShowTable((s) => !s)}>{showTable ? 'Show chart' : 'Show data'}</button>}>
-      <p className="muted small chart-desc">{description}</p>
-      {empty ? <EmptyState title="No data in this range" /> : showTable ? <div className="table-wrap">{table}</div> : (
-        <figure className="chart" aria-label={`${title}. ${description}`}>{children}</figure>
-      )}
-    </Panel>
-  );
-}
 
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 

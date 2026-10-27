@@ -208,7 +208,7 @@ await check('health: live checks', async () => {
 });
 
 await check('settings: banner change applies and is shown to staff', async () => {
-  await nav(admin).getByRole('link', { name: 'Settings' }).click();
+  await nav(admin).getByRole('link', { name: 'Settings', exact: true }).click();
   await admin.getByLabel('portal.banner_message').fill('Planned maintenance: Saturday 06:00-08:00 (synthetic notice)');
   await admin.locator('.setting-row', { hasText: 'portal.banner_message' }).getByRole('button', { name: 'Save' }).click();
   await admin.getByRole('dialog').getByLabel(/Reason/).fill('Maintenance window announced');

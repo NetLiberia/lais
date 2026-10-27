@@ -41,6 +41,20 @@ const HealthPage = named(() => import('./pages/admin/SystemPages'), 'HealthPage'
 const HelpPage = named(() => import('./pages/admin/SystemPages'), 'HelpPage');
 const ReportsPage = named(() => import('./pages/admin/SystemPages'), 'ReportsPage');
 const SettingsPage = named(() => import('./pages/admin/SystemPages'), 'SettingsPage');
+// Supervision.
+const SupervisorDashboard = named(() => import('./pages/supervisor/SupervisorDashboard'), 'SupervisorDashboard');
+const WorkQueue = named(() => import('./pages/supervisor/WorkQueue'), 'WorkQueue');
+const GisReviewQueue = named(() => import('./pages/supervisor/GisReview'), 'GisReviewQueue');
+const GisReviewDetailPage = named(() => import('./pages/supervisor/GisReview'), 'GisReviewDetailPage');
+const ConflictReview = named(() => import('./pages/supervisor/ConflictReview'), 'ConflictReview');
+const TasksPage = named(() => import('./pages/supervisor/Tasks'), 'TasksPage');
+const WorkloadPage = named(() => import('./pages/supervisor/Operations'), 'WorkloadPage');
+const OverduePage = named(() => import('./pages/supervisor/Operations'), 'OverduePage');
+const ActivityPage = named(() => import('./pages/supervisor/Operations'), 'ActivityPage');
+const SupervisionReportsPage = named(() => import('./pages/supervisor/Reports'), 'ReportsPage');
+const QualityPage = named(() => import('./pages/supervisor/Reports'), 'QualityPage');
+const EscalationsPage = named(() => import('./pages/supervisor/Escalations'), 'EscalationsPage');
+const NotificationsPage = named(() => import('./pages/NotificationsPage'), 'NotificationsPage');
 
 const DOCREQUEST_ROLES = ['processor', 'registrar', 'supervisor', 'auditor'];
 
@@ -71,6 +85,7 @@ function Start() {
   if (!session.authenticated) return <Navigate to="/login" replace />;
   if (session.state !== 'active') return <Navigate to="/mfa" replace />;
   if (hasRole('system_admin')) return <Navigate to="/admin" replace />;
+  if (hasRole('supervisor')) return <Navigate to="/supervisor" replace />;
   if (hasRole(...INTERNAL_ROLES)) return <Navigate to="/work" replace />;
   if (hasRole('landowner')) return <Navigate to="/me" replace />;
   return <Navigate to="/" replace />;
@@ -134,6 +149,21 @@ export function App() {
       <Route path="/admin/audit" element={<RequireSession needs={['audit.view_technical', 'audit.view_all']}><AdminAuditPage /></RequireSession>} />
       <Route path="/admin/health" element={<RequireSession needs={['system.health']}><HealthPage /></RequireSession>} />
       <Route path="/admin/settings" element={<RequireSession needs={['system.configure']}><SettingsPage /></RequireSession>} />
+
+      <Route path="/supervisor" element={<RequireSession needs={['supervision.view']}><SupervisorDashboard /></RequireSession>} />
+      <Route path="/supervisor/queue" element={<RequireSession needs={['supervision.view']}><WorkQueue /></RequireSession>} />
+      <Route path="/supervisor/gis-review" element={<RequireSession needs={['supervision.view']}><GisReviewQueue /></RequireSession>} />
+      <Route path="/supervisor/gis-review/:caseId" element={<RequireSession needs={['supervision.view']}><GisReviewDetailPage /></RequireSession>} />
+      <Route path="/supervisor/conflicts" element={<RequireSession needs={['supervision.view']}><ConflictReview /></RequireSession>} />
+      <Route path="/supervisor/tasks" element={<RequireSession needs={['task.manage']}><TasksPage mode="scope" /></RequireSession>} />
+      <Route path="/supervisor/workload" element={<RequireSession needs={['supervision.view']}><WorkloadPage /></RequireSession>} />
+      <Route path="/supervisor/overdue" element={<RequireSession needs={['supervision.view']}><OverduePage /></RequireSession>} />
+      <Route path="/supervisor/quality" element={<RequireSession needs={['reports.supervision']}><QualityPage /></RequireSession>} />
+      <Route path="/supervisor/reports" element={<RequireSession needs={['reports.supervision']}><SupervisionReportsPage /></RequireSession>} />
+      <Route path="/supervisor/activity" element={<RequireSession needs={['supervision.view']}><ActivityPage /></RequireSession>} />
+      <Route path="/escalations" element={<RequireSession needs={['escalation.view', 'escalation.view_system']}><EscalationsPage /></RequireSession>} />
+      <Route path="/notifications" element={<RequireSession><NotificationsPage /></RequireSession>} />
+      <Route path="/work/tasks" element={<RequireSession needs={['task.work']}><TasksPage mode="mine" /></RequireSession>} />
 
       <Route path="/work" element={<RequireSession roles={INTERNAL_ROLES}><CaseList /></RequireSession>} />
       <Route path="/work/cases/new" element={<RequireSession roles={['gis_officer', 'processor']}><NewCase /></RequireSession>} />

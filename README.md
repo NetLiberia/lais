@@ -34,6 +34,7 @@ Phase 3 prototype for the MSc project *Development and Evaluation of a Privacy-A
 | County management for all 15 counties: no invented boundaries, provisional imports, verification with provenance, and enablement gating new cases | `pages/admin/CountiesPage.tsx` |
 | GIS synchronization monitoring, settings, document categories, backups with a restore check, CSV reports, in-app notifications, global search, and an audit view limited to technical events | `pages/admin/`, `routes/adminOps.ts` |
 | OpenAPI 3.1 description generated from the routers (`/api/openapi.json`), with request bodies and query parameters taken from the handlers' own Zod schemas; structured JSON logs and request correlation IDs | `openapi.ts`, `logger.ts` |
+| Supervisor dashboard: live KPIs and charts in the supervisor's county scope, an application work queue, GIS quality review (accept, return for correction with categories and records, request information) with a review map, spatial conflict review, tasks with a Kanban board, staff workload, overdue work and bottlenecks, 12 audited reports, escalations and activity history. Quality acceptance is not legal approval; the administrator decides whether it is required before a registrar's approval | `pages/supervisor/`, `routes/supervision*.ts`, `routes/tasks.ts`, `routes/escalations.ts`, `010_supervision.sql`, [docs/workflow.md](docs/workflow.md) |
 | Landowner document requests: a landowner asks for copies on a parcel where they hold a registered interest; a processor chooses verified documents from published cases; a different registrar approves or refuses with a reason; copies can be downloaded for `DOCUMENT_RELEASE_DAYS`. Eligibility is re-checked at every download, highly sensitive documents are never released (enforced in the database too), and every download is audited | `routes/me.ts`, `routes/documentRequests.ts`, `005_document_requests.sql` |
 
 ## Architecture
@@ -57,6 +58,7 @@ More detail is in [docs/](docs/):
 - [security and privacy](docs/security.md)
 - [GIS synchronization](docs/gis-sync.md)
 - [backup and restore](docs/backup-restore.md)
+- [workflow and supervision](docs/workflow.md)
 - [Docker Compose](docs/install-docker.md) (unverified)
 - [implementation status](docs/status.md)
 
@@ -117,11 +119,11 @@ npm test
 ```
 
 - **44 unit tests**: permission matrix (and a check that `docs/permission-matrix.md` matches it), CSV formula safety, cross-county denial, separation of duties, workflow (including a check that the TypeScript transition table matches the SQL trigger), TOTP RFC test vectors, password hashing, GeoJSON/CRS intake (including malformed files), fractional shares, file sniffing.
-- **93 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration, transfer, subdivision, consolidation, correction, legacy-migration and confirmation lifecycles, landowner document requests, rate limits, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, administrator limits, the account lifecycle (invitation, activation, reset, suspension), the dashboard figures against the database, county enablement, settings, backups, reports, and the OpenAPI description. Two concurrency tests run only against a real multi-connection server. One publishes two overlapping parcels at the same moment and checks that the per-county lock lets only one through (verified to fail with the lock removed). The other checks that the audit hash chain survives 40 parallel writers.
+- **110 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration, transfer, subdivision, consolidation, correction, legacy-migration and confirmation lifecycles, landowner document requests, rate limits, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, administrator limits, the account lifecycle (invitation, activation, reset, suspension), the dashboard figures against the database, county enablement, settings, backups, reports, the OpenAPI description, and supervision (county scope, no legal authority, quality review and the optional approval gate, returns, conflicts, task rules, reports and escalation closure). Two concurrency tests run only against a real multi-connection server. One publishes two overlapping parcels at the same moment and checks that the per-county lock lets only one through (verified to fail with the lock removed). The other checks that the audit hash chain survives 40 parallel writers.
 
-Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 137 tests in about 26 seconds with the default 10-connection pool.
+Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 154 tests in about 30 seconds with the default 10-connection pool.
 
-`npm test` also runs **19 web component tests** (Vitest, Testing Library, jsdom). They cover:
+`npm test` also runs **24 web component tests** (Vitest, Testing Library, jsdom). They cover:
 - the shared dialogs: a reason is required, server refusals are shown, and focus stays where the user is typing;
 - tables and paging;
 - the navigation each role sees;
@@ -130,7 +132,7 @@ Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 137 tests in about 26 sec
 
 `npm run lint` runs ESLint over the API, the web app and the walkthroughs. API responses are typed in `web/src/types.ts`, and `any` is a lint error outside test files.
 
-**Browser walkthroughs.** With the API and web app running, `npm run e2e` drives Microsoft Edge through seven scripted journeys: registration, subdivision, document requests, corrections, legacy migration, confirmation, and the administrator dashboard. It resets the development database before each one. Set `LAIS_WEB_URL` if the web app is not on port 5173, and `BROWSER_PATH` for another Chromium browser. Screenshots go to `e2e/shots/`. Last run: 81 steps, 0 problems.
+**Browser walkthroughs.** With the API and web app running, `npm run e2e` drives Microsoft Edge through eight scripted journeys: registration, subdivision, document requests, corrections, legacy migration, confirmation, the administrator dashboard and the supervisor dashboard. It resets the development database before each one. Set `LAIS_WEB_URL` if the web app is not on port 5173, and `BROWSER_PATH` for another Chromium browser. Screenshots go to `e2e/shots/`. Last run: 97 steps, 0 problems.
 
 **Backups.** `npm run backup:verify -w server -- <file>` restores a backup into `TEST_DATABASE_URL` and checks it (see [docs/backup-restore.md](docs/backup-restore.md)).
 
@@ -144,7 +146,8 @@ All use `SEED_PASSWORD`.
 | `gis.mo`, `gis.mg` | GIS officer | Montserrado / Margibi |
 | `proc.mo`, `proc2.mo`, `proc.mg` | LAIS processor | Montserrado / Margibi |
 | `reg.mo`, `reg.mg` | Land registrar | Montserrado / Margibi |
-| `supervisor` | Supervisor (read-only oversight) | national |
+| `supervisor` | Supervisor: oversight and quality control, plus national read-only views | national |
+| `sup.mo` | Supervisor assigned to one county (sees only Montserrado) | Montserrado |
 | `auditor` | Independent auditor (read-only) | national |
 | `owner.demo` | Landowner, linked to the synthetic party "Musu Testperson" | own interests |
 

@@ -8,7 +8,7 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const ALL = ['walkthrough', 'subdivide', 'docrequest', 'correct', 'migrate', 'confirm', 'admin'];
+const ALL = ['walkthrough', 'subdivide', 'docrequest', 'correct', 'migrate', 'confirm', 'admin', 'supervisor'];
 const chosen = process.argv.slice(2).length ? process.argv.slice(2) : ALL;
 const root = fileURLToPath(new URL('..', import.meta.url));
 let failed = 0;

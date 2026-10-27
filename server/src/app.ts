@@ -22,6 +22,11 @@ import { meRouter } from './routes/me.js';
 import { parcelsRouter } from './routes/parcels.js';
 import { partiesRouter } from './routes/parties.js';
 import { publicRouter } from './routes/public.js';
+import { supervisionRouter } from './routes/supervision.js';
+import { supervisionReviewRouter } from './routes/supervisionReview.js';
+import { supervisionOpsRouter } from './routes/supervisionOps.js';
+import { tasksRouter } from './routes/tasks.js';
+import { escalationsRouter } from './routes/escalations.js';
 import { buildOpenApi } from './openapi.js';
 
 /**
@@ -44,6 +49,11 @@ export const API_MOUNTS: { path: string; router: Router; access: 'public' | 'int
   { path: '/document-categories', router: documentCategoriesRouter, access: 'internal', tag: 'Reference data' },
   { path: '/audit', router: auditRouter, access: 'internal', tag: 'Audit' },
   { path: '/me', router: meRouter, access: 'internal', tag: 'Landowner portal' },
+  { path: '/supervision', router: supervisionRouter, access: 'internal', tag: 'Supervision: dashboard and review' },
+  { path: '/supervision', router: supervisionReviewRouter, access: 'internal', tag: 'Supervision: GIS quality and conflicts' },
+  { path: '/supervision', router: supervisionOpsRouter, access: 'internal', tag: 'Supervision: workload, reports and activity' },
+  { path: '/tasks', router: tasksRouter, access: 'internal', tag: 'Tasks' },
+  { path: '/escalations', router: escalationsRouter, access: 'internal', tag: 'Escalations' },
 ];
 
 export function createApp() {

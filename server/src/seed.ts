@@ -38,6 +38,7 @@ const USERS: { username: string; displayName: string; role: string; county: numb
   { username: 'supervisor', displayName: 'National Supervisor (synthetic)', role: 'supervisor', county: null },
   { username: 'auditor', displayName: 'Independent Auditor (synthetic)', role: 'auditor', county: null },
   { username: 'owner.demo', displayName: 'Musu Testperson (synthetic landowner)', role: 'landowner', county: null },
+  { username: 'sup.mo', displayName: 'Supervisor, Montserrado (synthetic)', role: 'supervisor', county: 1 },
 ];
 
 const PARTIES = [

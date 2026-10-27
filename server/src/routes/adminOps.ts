@@ -13,6 +13,7 @@ import { enforce } from '../authz/enforce.js';
 import { log } from '../logger.js';
 import { ACCEPTED_SRIDS, extractFeatures } from '../services/geojson.js';
 import { csvCell } from '../csv.js';
+import { dateRange } from '../services/supervision.js';
 import { documentBody, documentQuery } from '../openapi.js';
 
 /**
@@ -26,14 +27,6 @@ const OPEN = ['draft', 'validating', 'under_review', 'returned', 'approved'];
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const rangeQuery = z.object({ from: isoDate.optional(), to: isoDate.optional(), countyId: z.coerce.number().int().optional() });
 
-/** Resolves a date range (default: the last 30 days, inclusive), limited to 366 days. */
-function dateRange(q: { from?: string; to?: string }) {
-  const to = q.to ? new Date(`${q.to}T00:00:00Z`) : new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
-  const from = q.from ? new Date(`${q.from}T00:00:00Z`) : new Date(to.getTime() - 29 * 86_400_000);
-  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) throw badRequest('Invalid date range');
-  if ((to.getTime() - from.getTime()) / 86_400_000 > 366) throw badRequest('Date range cannot exceed 366 days');
-  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
-}
 
 // ---------------------------------------------------------------------------
 // Dashboard
@@ -584,6 +577,9 @@ const SETTING_SCHEMAS: Record<string, z.ZodTypeAny> = {
   'portal.banner_message': z.string().max(300),
   'support.contact': z.string().min(3).max(300),
   'notifications.in_app_enabled': z.boolean(),
+  // Workflow configuration: operational choices, not legal rules. Targets are internal, not statutory deadlines.
+  'workflow.supervisor_review': z.enum(['optional', 'required']),
+  'workflow.stage_targets_days': z.partialRecord(z.enum(['draft', 'validating', 'under_review', 'returned', 'approved']), z.number().int().min(1).max(365)).nullable(),
 };
 
 adminOpsRouter.get('/settings', async (req, res) => {

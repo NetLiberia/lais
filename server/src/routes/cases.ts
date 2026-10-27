@@ -10,7 +10,8 @@ import { badRequest, conflict, HttpError, notFound, parseId } from '../http.js';
 import { writeAudit } from '../audit.js';
 import { enforce } from '../authz/enforce.js';
 import { authorize, scopeFor, type Action } from '../authz/policy.js';
-import { CASE_STATUSES } from '../authz/workflow.js';
+import { CASE_STATUSES, SPATIAL_CASE_TYPES } from '../authz/workflow.js';
+import { reviewMode } from '../services/supervision.js';
 import { caseContext, getCase, inCaseTx, recordEvent, setStatus } from '../services/cases.js';
 import { ACCEPTED_SRIDS, extractFeatures, FEATURE_LIMITS } from '../services/geojson.js';
 import { computeSnapshot } from '../services/snapshot.js';
@@ -307,8 +308,21 @@ casesRouter.get('/:id', async (req, res) => {
     ? 'You contributed to this case, so another registrar must review and decide it.'
     : null;
 
+  // Supervisory quality review of the current validation run (shown to registrars and preparers).
+  const { rows: [review] } = await pool.query(
+    `SELECT s.decision, s.created_at, s.validation_run_id, s.notes, u.username AS reviewer
+       FROM lais.supervisory_review s JOIN lais.app_user u ON u.id = s.reviewer_id WHERE s.case_id = $1 ORDER BY s.created_at DESC LIMIT 1`,
+    [cs.id],
+  );
+  const mode = await reviewMode(pool);
   res.json({
     case: { ...cs, county: county.rows[0] },
+    qualityReview: {
+      mode,
+      applies: (SPATIAL_CASE_TYPES as readonly string[]).includes(cs.case_type),
+      latest: review ?? null,
+      acceptedForCurrentRun: Boolean(review && review.decision === 'accepted' && validation && review.validation_run_id === validation.run.id),
+    },
     events: events.rows,
     rights: rights.rows,
     documents: documents.rows.map(({ uploaded_by, ...d }) => ({
@@ -747,6 +761,15 @@ casesRouter.post('/:id/decision', async (req, res) => {
       const open = latest.findings.filter((f) => f.severity === 'warning' && !f.acknowledged_by);
       if (open.length > 0) throw conflict(`Acknowledge all ${open.length} warning(s) with a note before approving`, { codes: open.map((f) => f.code) });
       if (!body.authorityBasis) throw badRequest('State the delegated authority under which you approve');
+      // When the administrator requires it, a supervisor must first accept these exact validation results.
+      if ((SPATIAL_CASE_TYPES as readonly string[]).includes(cs.case_type) && (await reviewMode(client)) === 'required') {
+        const { rows: [accepted] } = await client.query(
+          `SELECT 1 FROM lais.supervisory_review s WHERE s.case_id = $1 AND s.decision = 'accepted' AND s.validation_run_id = $2
+              AND NOT EXISTS (SELECT 1 FROM lais.supervisory_review r WHERE r.case_id = $1 AND r.created_at > s.created_at)`,
+          [cs.id, latest.run.id],
+        );
+        if (!accepted) throw conflict('A supervisor must accept the quality of the current submission before it can be approved');
+      }
     }
     const snapshot = await computeSnapshot(client, cs);
     await client.query(

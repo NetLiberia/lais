@@ -241,6 +241,13 @@ const BADGE_TONES: Record<string, string> = {
   invited: 'info', provisional: 'info', under_review: 'info', awaiting_validation: 'info', running: 'info', acknowledged: 'info',
   suspended: 'warn', warning: 'warn', synthetic: 'warn', returned: 'warn', open: 'warn', unknown: 'muted', superseded: 'muted',
   deactivated: 'danger', error: 'danger', failed: 'danger', failed_validation: 'danger', rejected: 'danger', unconfigured: 'muted',
+  // Supervision: tasks, reviews, conflicts, escalations, priority and severity.
+  unassigned: 'warn', assigned: 'info', in_progress: 'info', blocked: 'danger', completed: 'ok', cancelled: 'muted',
+  accepted: 'ok', info_requested: 'info', awaiting_review: 'warn', returned_by_validation: 'warn', not_submitted: 'muted', decided: 'muted',
+  passed: 'ok', passed_with_warnings: 'warn', not_validated: 'muted',
+  new: 'warn', investigating: 'info', awaiting_correction: 'warn', escalated: 'danger', resolved: 'ok',
+  quality_review: 'warn', registrar_decision: 'info', preparation: 'muted', gis_validation: 'info', approved: 'ok', withdrawn: 'muted',
+  urgent: 'danger', high: 'warn', normal: 'muted', low: 'muted', critical: 'danger', medium: 'info',
 };
 
 export function Badge({ value, label }: { value: string; label?: string }) {
@@ -263,7 +270,7 @@ export function Panel({ title, actions, children, className }: { title?: ReactNo
 
 export interface Column<T> {
   key: string;
-  header: string;
+  header: ReactNode;
   render: (row: T) => ReactNode;
   sortable?: boolean;
   className?: string;

@@ -229,12 +229,15 @@ async function geometryChecks(db: Db, cs: CaseRow, features: StagedFeature[], re
   const many = features.length > 1;
   let allValid = true;
   for (const f of features) {
+    const before = out.length;
     if (!f.structural_ok) {
       allValid = false;
       out.push(err('GEOMETRY_INVALID', `${featureLabel(f, many)}The imported geometry is invalid: ${f.structural_message}. Correct it in the GIS tool and re-import; the system does not repair geometries.`));
     } else {
       await featureChecks(db, cs, f, featureLabel(f, many), replacedParcelIds, out);
     }
+    // Record which feature each finding is about, for record-level review.
+    for (const finding of out.slice(before)) finding.featureIndex = f.feature_index;
   }
   return allValid;
 }

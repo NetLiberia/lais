@@ -2,17 +2,34 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Activity, AlertOctagon, BarChart3, Bell, BookOpen, ChevronsLeft, ChevronsRight, ClipboardList, FileStack, FileText, FolderKanban,
-  HardDrive, HelpCircle, KeyRound, LayoutDashboard, LogOut, Map, MapPinned, Menu, Moon, RefreshCw, ScrollText, Search, Settings,
-  ShieldCheck, Sun, UserCircle2, Users, X,
+  Activity, AlarmClock, AlertOctagon, BarChart3, Bell, BookOpen, ChevronsLeft, ChevronsRight, ClipboardCheck, ClipboardList, FileStack, FileText,
+  FolderKanban, HardDrive, HelpCircle, History, KeyRound, Layers, LayoutDashboard, ListChecks, LogOut, Map, MapPinned, Menu, Moon, RefreshCw,
+  ScrollText, Search, Settings, ShieldCheck, Siren, Sun, UserCircle2, Users, X,
 } from 'lucide-react';
 import { api, ROLE_LABELS } from '../api';
 import { useAuth } from '../auth';
 import { fmtDateTime } from '../components/kit';
+import { ScopeSelector, SupervisionScopeProvider } from '../pages/supervisor/common';
 
 /** Sidebar entries. `needs` lists capabilities; an entry is shown if the account has any of them. */
-interface NavItem { to: string; label: string; icon: ReactNode; needs: string[]; end?: boolean }
+interface NavItem { to: string; label: string; icon: ReactNode; needs: string[]; end?: boolean; hideIf?: string[] }
 const NAV: { heading: string; items: NavItem[] }[] = [
+  {
+    heading: 'Supervision',
+    items: [
+      { to: '/supervisor', label: 'Overview', icon: <LayoutDashboard size={18} />, needs: ['supervision.view'], end: true },
+      { to: '/supervisor/queue', label: 'Application Work Queue', icon: <FolderKanban size={18} />, needs: ['supervision.view'] },
+      { to: '/supervisor/gis-review', label: 'GIS Quality Review', icon: <Layers size={18} />, needs: ['supervision.view'] },
+      { to: '/supervisor/conflicts', label: 'Spatial Conflict Review', icon: <AlertOctagon size={18} />, needs: ['supervision.view'] },
+      { to: '/supervisor/tasks', label: 'Task Assignment', icon: <ListChecks size={18} />, needs: ['task.manage'] },
+      { to: '/supervisor/workload', label: 'Staff Workload', icon: <Users size={18} />, needs: ['supervision.view'] },
+      { to: '/supervisor/overdue', label: 'Overdue Cases', icon: <AlarmClock size={18} />, needs: ['supervision.view'] },
+      { to: '/supervisor/quality', label: 'Quality & Compliance', icon: <ClipboardCheck size={18} />, needs: ['reports.supervision'] },
+      { to: '/supervisor/reports', label: 'Reports & Analytics', icon: <BarChart3 size={18} />, needs: ['reports.supervision'] },
+      { to: '/escalations', label: 'Escalations', icon: <Siren size={18} />, needs: ['supervision.view'] },
+      { to: '/supervisor/activity', label: 'Activity History', icon: <History size={18} />, needs: ['supervision.view'] },
+    ],
+  },
   {
     heading: 'Administration',
     items: [
@@ -38,11 +55,15 @@ const NAV: { heading: string; items: NavItem[] }[] = [
       { to: '/work/document-requests', label: 'Document requests', icon: <FileText size={18} />, needs: ['docrequest.view'] },
       { to: '/work/parties', label: 'Parties', icon: <Users size={18} />, needs: ['party.search'] },
       { to: '/work/audit', label: 'Audit trail', icon: <ShieldCheck size={18} />, needs: ['audit.view_all'] },
+      { to: '/work/tasks', label: 'My tasks', icon: <ListChecks size={18} />, needs: ['task.work'], hideIf: ['supervision.view'] },
+      { to: '/escalations', label: 'Escalations', icon: <Siren size={18} />, needs: ['escalation.view', 'escalation.view_system'], hideIf: ['supervision.view'] },
     ],
   },
   {
     heading: 'Help',
     items: [
+      { to: '/notifications', label: 'Notifications', icon: <Bell size={18} />, needs: [] },
+      { to: '/account', label: 'Profile & Settings', icon: <UserCircle2 size={18} />, needs: [] },
       { to: '/', label: 'Public map', icon: <Map size={18} />, needs: [], end: true },
       { to: '/help', label: 'Help & Documentation', icon: <HelpCircle size={18} />, needs: [] },
     ],
@@ -57,11 +78,17 @@ const CRUMBS: [RegExp, string][] = [
   [/^\/admin\/audit/, 'Audit & Security Logs'], [/^\/admin\/health/, 'System Health'], [/^\/admin\/settings/, 'Settings'],
   [/^\/work\/cases\/new/, 'New case'], [/^\/work\/cases\//, 'Case'], [/^\/work\/parcels\//, 'Parcel record'], [/^\/work\/document-requests/, 'Document requests'],
   [/^\/work\/parties/, 'Parties'], [/^\/work\/audit/, 'Audit trail'], [/^\/account/, 'Account & security'], [/^\/help/, 'Help & Documentation'],
+  [/^\/supervisor\/queue/, 'Application Work Queue'], [/^\/supervisor\/gis-review\/./, 'GIS review'], [/^\/supervisor\/gis-review/, 'GIS Quality Review'],
+  [/^\/supervisor\/conflicts/, 'Spatial Conflict Review'], [/^\/supervisor\/tasks/, 'Task Assignment'], [/^\/supervisor\/workload/, 'Staff Workload'],
+  [/^\/supervisor\/overdue/, 'Overdue Cases'], [/^\/supervisor\/quality/, 'Quality & Compliance'], [/^\/supervisor\/reports/, 'Reports & Analytics'],
+  [/^\/supervisor\/activity/, 'Activity History'], [/^\/escalations/, 'Escalations'], [/^\/notifications/, 'Notifications'], [/^\/work\/tasks/, 'My tasks'],
 ];
 
 function Breadcrumbs() {
   const { pathname } = useLocation();
-  const section = pathname.startsWith('/admin') ? { to: '/admin', label: 'Administration' } : pathname.startsWith('/work') ? { to: '/work', label: 'Land administration' } : null;
+  const section = pathname.startsWith('/admin') ? { to: '/admin', label: 'Administration' }
+    : pathname.startsWith('/supervisor') || pathname.startsWith('/escalations') ? { to: '/supervisor', label: 'Supervision' }
+    : pathname.startsWith('/work') ? { to: '/work', label: 'Land administration' } : null;
   const leaf = CRUMBS.find(([re]) => re.test(pathname))?.[1] ?? (pathname === '/admin' ? 'Dashboard' : pathname === '/work' ? 'Cases' : null);
   return (
     <nav aria-label="Breadcrumb" className="crumbs">
@@ -220,6 +247,10 @@ function ProfileMenu() {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  return <SupervisionScopeProvider><ShellLayout>{children}</ShellLayout></SupervisionScopeProvider>;
+}
+
+function ShellLayout({ children }: { children: ReactNode }) {
   const { session, can, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('lais.sidebar') === 'collapsed'; } catch { return false; }
@@ -232,7 +263,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => { try { localStorage.setItem('lais.sidebar', collapsed ? 'collapsed' : 'expanded'); } catch { /* ignore */ } }, [collapsed]);
 
   const sections = useMemo(
-    () => NAV.map((s) => ({ ...s, items: s.items.filter((i) => i.needs.length === 0 || can(...i.needs)) })).filter((s) => s.items.length > 0),
+    () => NAV.map((s) => ({ ...s, items: s.items.filter((i) => (i.needs.length === 0 || can(...i.needs)) && !(i.hideIf && can(...i.hideIf))) })).filter((s) => s.items.length > 0),
     [can],
   );
   const user = session!.user!;
@@ -276,7 +307,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Breadcrumbs />
           <GlobalSearch />
           <div className="topbar-actions">
-            <ScopeIndicator />
+            {can('supervision.view') ? <ScopeSelector /> : <ScopeIndicator />}
             <NotificationCenter />
             <button className="icon-btn" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={toggleTheme}>
               {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}

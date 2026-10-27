@@ -19,6 +19,9 @@ export interface CaseRow {
   source_reference: string | null;
   correction_reason: string | null;
   area_m2_surveyed: string | null;
+  /** Operational fields set by supervisors; outside the decision snapshot. */
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  due_date: Date | null;
   created_by: string;
   created_at: Date;
   updated_at: Date;

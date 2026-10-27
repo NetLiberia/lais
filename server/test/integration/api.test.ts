@@ -119,7 +119,7 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
     await resetDatabase(PASSWORD, () => undefined);
     app = (await import('../../src/app.js')).createApp();
     pool = (await import('../../src/db.js')).pool;
-    for (const u of ['admin', 'gis.mo', 'gis.mg', 'proc.mo', 'proc2.mo', 'reg.mo', 'reg.mg', 'supervisor', 'auditor', 'owner.demo']) {
+    for (const u of ['admin', 'gis.mo', 'gis.mg', 'proc.mo', 'proc2.mo', 'proc.mg', 'reg.mo', 'reg.mg', 'supervisor', 'sup.mo', 'auditor', 'owner.demo']) {
       users[u] = await new Client(u).login();
     }
   });
@@ -1241,6 +1241,320 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
       expect(verify.body).toMatchObject({ intact: true });
     });
   });
+  describe('supervision', () => {
+    const setReviewMode = async (mode: 'optional' | 'required') =>
+      expect((await as('admin').put('/api/admin/settings/workflow.supervisor_review', { value: mode, reason: 'Integration test configuration' })).status).toBe(200);
+    const userId = async (username: string) => (await pool.query('SELECT id FROM lais.app_user WHERE username = $1', [username])).rows[0].id as string;
+    let mgCase: string;
+
+    beforeAll(async () => {
+      // The administration tests suspend reg.mg; bring the account back for the cross-county checks here.
+      const regMg = await userId('reg.mg');
+      const status = (await pool.query('SELECT status FROM lais.app_user WHERE id = $1', [regMg])).rows[0].status;
+      if (status !== 'active') expect((await as('admin').post(`/api/admin/users/${regMg}/status`, { status: 'active', reason: 'Back for supervision tests' })).status).toBe(200);
+      users['reg.mg'] = await new Client('reg.mg').login();
+      const created = await as('gis.mg').post('/api/cases', { caseType: 'first_registration', countyId: 2, landCategory: 'private', sourceReference: 'SYNTHETIC-MG' });
+      expect(created.status).toBe(201);
+      mgCase = created.body.id;
+    });
+
+    describe('authorization', () => {
+      it('keeps a county supervisor inside their county, whatever county the client asks for', async () => {
+        expect((await as('sup.mo').get('/api/supervision/applications?countyId=2')).status).toBe(403);
+        expect((await as('sup.mo').get(`/api/supervision/cases/${mgCase}`)).status).toBe(403);
+        expect((await as('sup.mo').get('/api/supervision/dashboard/summary?countyId=2')).status).toBe(403);
+        const scope = await as('sup.mo').get('/api/supervision/scope');
+        expect(scope.body.national).toBe(false);
+        expect(scope.body.counties.map((c: any) => c.code)).toEqual(['MO']);
+        // National views are closed to a county supervisor; the national supervisor keeps them.
+        expect((await as('sup.mo').get('/api/admin/dashboard/summary')).status).toBe(403);
+        expect((await as('sup.mo').get('/api/admin/users')).status).toBe(403);
+        expect((await as('supervisor').get('/api/admin/dashboard/summary')).status).toBe(200);
+        const session = await as('sup.mo').get('/api/auth/session');
+        expect(session.body.capabilities).toContain('supervision.view');
+        expect(session.body.capabilities).not.toContain('dashboard.view');
+        // Their audit view is limited to their county.
+        const audit = await as('sup.mo').get('/api/audit?limit=200');
+        expect(audit.body.scope).toBe('county');
+        expect(audit.body.events.every((e: any) => e.county_id === 1)).toBe(true);
+        const denied = await pool.query(`SELECT 1 FROM audit.event WHERE action = 'authz.denied' AND actor_username = 'sup.mo' AND county_id = 2`);
+        expect(denied.rowCount).toBeGreaterThan(0);
+      });
+
+      it('gives supervisors no legal authority: no decision, publication, role assignment or geometry import', async () => {
+        const id = await prepareRegistration('valid_parcel_4326.geojson');
+        expect((await submit(id)).status).toBe('under_review');
+        for (const who of ['sup.mo', 'supervisor']) {
+          expect((await as(who).post(`/api/cases/${id}/decision`, { decision: 'approved', reason: 'Trying to approve', authorityBasis: 'none' })).status).toBe(403);
+          expect((await as(who).post(`/api/cases/${id}/publish`)).status).toBe(403);
+          expect((await as(who).upload(`/api/cases/${id}/geometry`, fixture('valid_parcel_4326.geojson'), 'x.geojson', { crs: '4326' })).status).toBe(403);
+        }
+        const supId = await userId('sup.mo');
+        expect((await as('sup.mo').post(`/api/admin/users/${supId}/roles`, { role: 'system_admin', reason: 'Self elevation attempt' })).status).toBe(403);
+        expect((await as('supervisor').post(`/api/admin/users/${supId}/roles`, { role: 'registrar', countyId: 1, reason: 'Elevation attempt' })).status).toBe(403);
+      });
+
+      it('cannot change or delete review, task, escalation or audit history, even in the database', async () => {
+        await pool.query(`INSERT INTO lais.supervisory_review (case_id, county_id, decision, notes, case_status, reviewer_id)
+                          SELECT id, county_id, 'info_requested', 'Fixture row for immutability', status, created_by FROM lais.land_case LIMIT 1`);
+        for (const sql of ['DELETE FROM lais.supervisory_review', 'UPDATE lais.supervisory_review SET notes = notes', 'DELETE FROM audit.event']) {
+          await expect(pool.query(sql), sql).rejects.toThrow();
+        }
+      });
+    });
+
+    describe('GIS quality review', () => {
+      it('accepts a valid submission without approving or publishing anything', async () => {
+        const caseId = await prepareRegistration('valid_parcel_4326.geojson');
+        expect((await submit(caseId)).status).toBe('under_review');
+        const queue = await as('sup.mo').get('/api/supervision/gis-reviews?status=awaiting_review');
+        expect(queue.body.items.some((i: any) => i.case_id === caseId)).toBe(true);
+        const detail = await as('sup.mo').get(`/api/supervision/gis-reviews/${caseId}`);
+        expect(detail.status).toBe(200);
+        expect(detail.body.submission.sourceCrs).toBe('EPSG:4326');
+        expect(detail.body.records[0].geometry.type).toMatch(/Polygon$/);
+
+        const accepted = await as('sup.mo').post(`/api/supervision/cases/${caseId}/accept`, { notes: 'Geometry and attributes checked' });
+        expect(accepted.status).toBe(201);
+        const cs = await caseDetail(caseId);
+        expect(cs.case.status).toBe('under_review');
+        expect(cs.qualityReview.acceptedForCurrentRun).toBe(true);
+        expect((await as('sup.mo').post(`/api/supervision/cases/${caseId}/accept`, { notes: 'Accept twice' })).status).toBe(409);
+        const audit = await pool.query(`SELECT 1 FROM audit.event WHERE action = 'supervision.accept' AND case_id = $1`, [caseId]);
+        expect(audit.rowCount).toBe(1);
+      });
+
+      it('makes acceptance a precondition of approval only when the administrator requires it', async () => {
+        await setReviewMode('required');
+        try {
+          const other = await prepareRegistration('valid_parcel_4326.geojson');
+          await submit(other);
+          await acknowledgeAll(other);
+          const refused = await approve(other);
+          expect(refused.status).toBe(409);
+          expect(refused.body.error).toMatch(/supervisor must accept/);
+          expect((await as('sup.mo').post(`/api/supervision/cases/${other}/accept`, { notes: 'Quality checked' })).status).toBe(201);
+          expect((await approve(other)).status).toBe(200);
+        } finally {
+          await setReviewMode('optional');
+        }
+      });
+
+      it('refuses to accept a submission that failed validation', async () => {
+        const bad = await prepareRegistration('self_intersecting_4326.geojson');
+        expect((await submit(bad)).status).toBe('returned');
+        expect((await as('sup.mo').post(`/api/supervision/cases/${bad}/accept`, { notes: 'Trying to accept' })).status).toBe(403);
+      });
+
+      it('returns work to the responsible GIS officer and keeps the earlier submission and review', async () => {
+        const id = await prepareRegistration('valid_parcel_4326.geojson');
+        await submit(id);
+        const noCategory = await as('sup.mo').post(`/api/supervision/cases/${id}/return`, { reason: 'Boundary needs checking', issueCategories: [] });
+        expect(noCategory.status).toBe(400);
+        const ret = await as('sup.mo').post(`/api/supervision/cases/${id}/return`, {
+          reason: 'The boundary does not follow the survey plan', issueCategories: ['geometry_invalid'], affectedFeatures: [0], instructions: 'Re-digitise from the plan',
+        });
+        expect(ret.status).toBe(201);
+        expect(ret.body.task.assignee).toBe('gis.mo');
+        expect((await caseDetail(id)).case.status).toBe('returned');
+        const mine = await as('gis.mo').get('/api/tasks?view=mine&status=open&pageSize=100');
+        expect(mine.body.items.some((t: any) => t.case_id === id && t.task_type === 'gis_validation_correction')).toBe(true);
+        const note = await pool.query(`SELECT 1 FROM lais.notification n JOIN lais.app_user u ON u.id = n.user_id WHERE u.username = 'gis.mo' AND n.title LIKE '%returned for correction%'`);
+        expect(note.rowCount).toBeGreaterThan(0);
+
+        // Correction: a new import and resubmission. The first submission and the return stay in the history.
+        expect((await as('gis.mo').upload(`/api/cases/${id}/geometry`, fixture('valid_parcel_4326.geojson'), 'fixed.geojson', { crs: '4326' })).status).toBe(201);
+        expect((await submit(id)).status).toBe('under_review');
+        const detail = await as('sup.mo').get(`/api/supervision/gis-reviews/${id}`);
+        expect(detail.body.history.map((b: any) => b.status)).toEqual(['superseded', 'active']);
+        const sup = await as('sup.mo').get(`/api/supervision/cases/${id}`);
+        expect(sup.body.reviews[0].decision).toBe('returned');
+        expect(sup.body.qualityAccepted).toBe(false);
+        expect(sup.body.acceptBlockedBy).toEqual([]);
+      });
+
+      it('tracks an information request as a task whose completion is the response', async () => {
+        const id = await prepareRegistration('valid_parcel_4326.geojson');
+        await submit(id);
+        const ask = await as('sup.mo').post(`/api/supervision/cases/${id}/request-info`, { message: 'Which survey plan version was digitised?' });
+        expect(ask.status).toBe(201);
+        const task = (await as('gis.mo').get(`/api/tasks?view=mine&caseId=${id}`)).body.items[0];
+        expect((await as('gis.mo').post(`/api/tasks/${task.id}/status`, { to: 'completed', note: 'Plan version 2 of 2026' })).status).toBe(200);
+        const sup = await as('sup.mo').get(`/api/supervision/cases/${id}`);
+        expect(sup.body.reviews[0]).toMatchObject({ decision: 'info_requested', task_status: 'completed', response: 'Plan version 2 of 2026' });
+      });
+    });
+
+    describe('spatial conflicts', () => {
+      it('keeps a conflict visible until a registrar acknowledges it, and offers no way to dismiss it', async () => {
+        const id = await prepareRegistration('overlap_published_4326.geojson');
+        await submit(id);
+        const list = await as('sup.mo').get('/api/supervision/conflicts?pageSize=100');
+        const mine = list.body.items.filter((c: any) => c.case_id === id && c.code === 'OVERLAP_PUBLISHED_PARCEL');
+        expect(mine.length).toBeGreaterThan(0);
+        expect(mine[0].review_status).toBe('new');
+        expect(mine[0].category).toBe('potential_overlap');
+
+        const detail = await as('sup.mo').get(`/api/supervision/conflicts/${mine[0].id}`);
+        expect(detail.status).toBe(200);
+        expect(Number(detail.body.evidence.intersection_m2)).toBeGreaterThan(1);
+
+        expect((await as('sup.mo').post(`/api/supervision/conflicts/${mine[0].id}/actions`, { action: 'resolved', note: 'Looks fine to me' })).status).toBe(400);
+        const gisId = await userId('gis.mo');
+        const inv = await as('sup.mo').post(`/api/supervision/conflicts/${mine[0].id}/actions`, { action: 'investigation_assigned', note: 'Compare with the 2019 survey', assigneeId: gisId });
+        expect(inv.status).toBe(201);
+        expect((await as('sup.mo').get(`/api/supervision/conflicts/${mine[0].id}`)).body.conflict.review_status).toBe('investigating');
+
+        // Only the registrar's acknowledgement resolves it; the evidence and review history stay.
+        await acknowledgeAll(id);
+        const resolved = await as('sup.mo').get('/api/supervision/conflicts?status=resolved&pageSize=100');
+        expect(resolved.body.items.some((c: any) => c.case_id === id && c.code === 'OVERLAP_PUBLISHED_PARCEL')).toBe(true);
+        const events = (await as('sup.mo').get(`/api/supervision/conflicts/${mine[0].id}`)).body.events;
+        expect(events.map((e: any) => e.action)).toContain('investigation_assigned');
+      });
+    });
+
+    describe('tasks', () => {
+      let taskId: string;
+
+      it('assigns county tasks only to active, eligible staff of that county', async () => {
+        const base = { taskType: 'document_review', title: 'Check the deed scan', countyId: 1 };
+        expect((await as('sup.mo').post('/api/tasks', { ...base, assigneeId: await userId('proc.mg') })).status).toBe(409);
+        expect((await as('sup.mo').post('/api/tasks', { ...base, assigneeId: await userId('gis.mo') })).status).toBe(409);
+        expect((await as('sup.mo').post('/api/tasks', { ...base, assigneeId: await userId('reg.mo') })).status).toBe(409);
+        expect((await as('sup.mo').post('/api/tasks', { ...base, countyId: 2, assigneeId: await userId('proc.mg') })).status).toBe(403);
+        expect((await as('proc.mo').post('/api/tasks', { ...base, assigneeId: await userId('proc2.mo') })).status).toBe(403);
+        const ok = await as('sup.mo').post('/api/tasks', { ...base, assigneeId: await userId('proc.mo'), priority: 'high' });
+        expect(ok.status).toBe(201);
+        taskId = ok.body.id;
+      });
+
+      it('records the reason for every reassignment', async () => {
+        expect((await as('sup.mo').post(`/api/tasks/${taskId}/assign`, { assigneeId: await userId('proc2.mo') })).status).toBe(400);
+        expect((await as('sup.mo').post(`/api/tasks/${taskId}/assign`, { assigneeId: await userId('proc2.mo'), reason: 'proc.mo is on leave' })).status).toBe(200);
+        const t = await as('sup.mo').get(`/api/tasks/${taskId}`);
+        expect(t.body.events.find((e: any) => e.action === 'reassigned')).toMatchObject({ note: 'proc.mo is on leave' });
+        expect((await as('proc.mo').post(`/api/tasks/${taskId}/status`, { to: 'in_progress' })).status).toBe(403);
+      });
+
+      it('enforces task transitions and never erases a completed task', async () => {
+        expect((await as('proc2.mo').post(`/api/tasks/${taskId}/status`, { to: 'returned' })).status).toBe(409);
+        expect((await as('proc2.mo').post(`/api/tasks/${taskId}/status`, { to: 'in_progress' })).status).toBe(200);
+        expect((await as('proc2.mo').post(`/api/tasks/${taskId}/status`, { to: 'completed' })).status).toBe(400);
+        expect((await as('proc2.mo').post(`/api/tasks/${taskId}/status`, { to: 'completed', note: 'Deed scan matches the original' })).status).toBe(200);
+        expect((await as('sup.mo').post(`/api/tasks/${taskId}/status`, { to: 'cancelled', note: 'Trying to hide it' })).status).toBe(409);
+        expect((await as('sup.mo').patch(`/api/tasks/${taskId}`, { priority: 'low', reason: 'Changing a closed task' })).status).toBe(409);
+        await expect(pool.query('DELETE FROM lais.task WHERE id = $1', [taskId])).rejects.toThrow(/cannot be deleted/);
+        await expect(pool.query(`UPDATE lais.task SET status = 'blocked' WHERE id = $1`, [taskId])).rejects.toThrow(/Illegal task status transition/);
+        await expect(pool.query('DELETE FROM lais.task_event WHERE task_id = $1', [taskId])).rejects.toThrow(/append-only/);
+        // A supervisor may return completed work for more effort; the completion stays in the history.
+        expect((await as('sup.mo').post(`/api/tasks/${taskId}/status`, { to: 'returned', note: 'Also check the stamp' })).status).toBe(200);
+        const t = await as('sup.mo').get(`/api/tasks/${taskId}`);
+        expect(t.body.events.map((e: any) => e.action)).toEqual(['created', 'reassigned', 'status_changed', 'completed', 'returned']);
+      });
+    });
+
+    describe('dashboard and reports', () => {
+      it('reports figures that match the database, in scope only', async () => {
+        const summary = await as('sup.mo').get('/api/supervision/dashboard/summary');
+        expect(summary.status).toBe(200);
+        const { rows: [db] } = await pool.query(
+          `SELECT count(*)::int AS total, count(*) FILTER (WHERE status = 'returned')::int AS returned, count(*) FILTER (WHERE status = 'draft')::int AS drafts
+             FROM lais.land_case WHERE county_id = 1`);
+        expect(summary.body.applications_total).toBe(db.total);
+        expect(summary.body.returned_for_correction).toBe(db.returned);
+        expect(summary.body.awaiting_processing).toBe(db.drafts);
+        const { rows: [runs] } = await pool.query(
+          `SELECT count(*)::int AS n, count(*) FILTER (WHERE error_count = 0)::int AS passed FROM staging.validation_run r JOIN lais.land_case c ON c.id = r.case_id
+            WHERE c.county_id = 1 AND r.purpose = 'submission' AND r.run_at >= current_date - 29`);
+        expect(summary.body.submissions_validated).toBe(runs.n);
+        expect(summary.body.quality_pass_rate).toBe(Math.round((1000 * runs.passed) / runs.n) / 10);
+
+        const national = await as('supervisor').get('/api/supervision/dashboard/summary');
+        expect(national.body.applications_total).toBeGreaterThan(summary.body.applications_total);
+
+        const charts = await as('sup.mo').get('/api/supervision/dashboard/charts');
+        expect(charts.body.stages.reduce((n: number, s: any) => n + s.count, 0)).toBe(db.total);
+      });
+
+      it('filters and pages the work queue without leaking other counties', async () => {
+        const all = await as('sup.mo').get('/api/supervision/applications?pageSize=100');
+        expect(all.body.items.every((i: any) => i.county_code === 'MO')).toBe(true);
+        expect(all.body.items.some((i: any) => i.id === mgCase)).toBe(false);
+        const page2 = await as('sup.mo').get('/api/supervision/applications?pageSize=10&page=2&sort=case_no&dir=asc');
+        expect(page2.body.items.length).toBeLessThanOrEqual(10);
+        expect(page2.body.total).toBe(all.body.total);
+        const returned = await as('sup.mo').get('/api/supervision/applications?stage=returned');
+        expect(returned.body.items.length).toBeGreaterThan(0);
+        expect(returned.body.items.every((i: any) => i.stage === 'returned')).toBe(true);
+        expect((await as('sup.mo').get('/api/supervision/applications?pageSize=7')).status).toBe(400);
+      });
+
+      it('scopes and audits reports', async () => {
+        const before = await pool.query(`SELECT count(*)::int AS n FROM audit.event WHERE action = 'report.supervision' AND actor_username = 'sup.mo'`);
+        const r = await as('sup.mo').get('/api/supervision/reports/application_status?from=2026-01-01');
+        expect(r.status).toBe(200);
+        expect(r.body.scope).toBe('MO');
+        expect(r.body.rows.every((x: any) => x.county === 'MO')).toBe(true);
+        expect(r.body.columns.find((c: any) => c.key === 'days_in_stage').kind).toBe('derived');
+        expect((await as('sup.mo').get('/api/supervision/reports/application_status?countyId=2')).status).toBe(403);
+        const csv = await as('sup.mo').get('/api/supervision/reports/staff_workload.csv');
+        expect(csv.status).toBe(200);
+        expect(csv.text).toMatch(/^# Staff workload/);
+        expect(csv.text).toMatch(/synthetic demonstration data/);
+        expect(csv.text).not.toMatch(/proc\.mg|gis\.mg/);
+        const after = await pool.query(`SELECT count(*)::int AS n FROM audit.event WHERE action = 'report.supervision' AND actor_username = 'sup.mo'`);
+        expect(after.rows[0].n - before.rows[0].n).toBe(2);
+        expect((await as('gis.mo').get('/api/supervision/reports/application_status')).status).toBe(403);
+      });
+    });
+
+    describe('escalations', () => {
+      it('routes, preserves history and closes only under the closure policy', async () => {
+        const id = await prepareRegistration('valid_parcel_4326.geojson');
+        const created = await as('sup.mo').post('/api/escalations', {
+          category: 'spatial_conflict', severity: 'high', title: 'Possible double allocation', countyId: 1, caseId: id,
+          description: 'The parcel appears in two unrelated survey records.',
+        });
+        expect(created.status).toBe(201);
+        expect(created.body).toMatchObject({ responsibleRole: 'registrar', responsibleLevel: 'county' });
+        const eid = created.body.id;
+        expect((await as('sup.mo').post('/api/escalations', { category: 'spatial_conflict', severity: 'high', title: 'Wrong county', countyId: 2, description: 'Not my county at all' })).status).toBe(403);
+
+        expect((await as('reg.mo').post(`/api/escalations/${eid}/close`, { reason: 'Nothing to see here really' })).status).toBe(409);
+        expect((await as('sup.mo').post(`/api/escalations/${eid}/acknowledge`, {})).status).toBe(403);
+        expect((await as('reg.mg').get(`/api/escalations/${eid}`)).status).toBe(403);
+        expect((await as('reg.mo').post(`/api/escalations/${eid}/acknowledge`, { note: 'Looking into it' })).status).toBe(200);
+        const inv = await as('reg.mo').post(`/api/escalations/${eid}/investigate`, { note: 'Check the 2019 survey register', assigneeId: await userId('gis.mo') });
+        expect(inv.status).toBe(200);
+        const closeEarly = await as('reg.mo').post(`/api/escalations/${eid}/close`, { reason: 'Investigated and explained' });
+        expect(closeEarly.status).toBe(409);
+        expect(closeEarly.body.error).toMatch(/linked task/);
+        expect((await as('gis.mo').post(`/api/tasks/${inv.body.task.id}/status`, { to: 'completed', note: 'Same parcel, duplicate survey entry' })).status).toBe(200);
+        expect((await as('reg.mo').post(`/api/escalations/${eid}/close`, { reason: 'short' })).status).toBe(400);
+        expect((await as('reg.mo').post(`/api/escalations/${eid}/close`, { reason: 'Duplicate survey entry; no double allocation' })).status).toBe(200);
+        expect((await as('reg.mo').post(`/api/escalations/${eid}/comments`, { note: 'After closing' })).status).toBe(409);
+
+        const detail = await as('sup.mo').get(`/api/escalations/${eid}`);
+        expect(detail.body.events.map((e: any) => e.action)).toEqual(['opened', 'acknowledged', 'investigation_requested', 'closed']);
+        expect(detail.body.escalation.evidence[0]).toMatchObject({ type: 'case' });
+        await expect(pool.query(`UPDATE lais.escalation SET description = 'rewritten' WHERE id = $1`, [eid])).rejects.toThrow();
+        await expect(pool.query('DELETE FROM lais.escalation_event WHERE escalation_id = $1', [eid])).rejects.toThrow(/append-only/);
+      });
+
+      it('lets the responsible role escalate further, and the new owner must acknowledge it', async () => {
+        const created = await as('sup.mo').post('/api/escalations', {
+          category: 'processing_delay', severity: 'medium', title: 'Backlog in Montserrado', countyId: 1, description: 'Submissions are waiting more than two weeks.',
+        });
+        const eid = created.body.id;
+        expect(created.body.responsibleRole).toBe('supervisor');
+        expect((await as('sup.mo').post(`/api/escalations/${eid}/escalate`, { target: { role: 'supervisor', level: 'national' }, reason: 'Needs national resourcing' })).status).toBe(200);
+        expect((await as('sup.mo').post(`/api/escalations/${eid}/acknowledge`, {})).status).toBe(403);
+        expect((await as('supervisor').post(`/api/escalations/${eid}/acknowledge`, {})).status).toBe(200);
+      });
+    });
+  });
+
   describe('API description', () => {
     it('serves an OpenAPI document generated from the mounted routers, with a summary for every route', async () => {
       const { API_MOUNTS } = await import('../../src/app.js');

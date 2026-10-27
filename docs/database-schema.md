@@ -50,6 +50,22 @@ Migrations live in `server/db/migrations/` and are applied in order by `npm run 
 | `document_request` | Landowner requests for copies | Has a workflow trigger and a release expiry. |
 | `document_request_item` | Documents released under a request | |
 
+### Supervision (migration 010)
+
+| Table | Purpose | Notes |
+|---|---|---|
+| `land_case.priority`, `land_case.due_date` | Operational priority and due date | Set by supervisors, with the reason recorded in the case history. Outside the decision snapshot. Frozen once the case is closed. |
+| `review_issue_category` | Issue categories for returns | Geometry, overlap, boundary, CRS, area, identifier, attributes, documents, stale source, other. |
+| `supervisory_review` | Quality reviews: accepted, returned, information requested | Tied to the validation run and staging batch reviewed. A return must name at least one category, and can list affected records. Append-only. |
+| `task` | Operational tasks | The type limits who can be assigned it. The status transitions are enforced by `enforce_task_transition`, and deletion is refused. Can link to a case, batch, finding or escalation. |
+| `task_event` | Every change to a task | Covers creation, assignment and reassignment (with reason), status changes, priority and due-date changes, comments with references, and follow-ups. It stands in for separate task-assignment and task-comment tables. Append-only. |
+| `escalation` | Escalations | Category, severity, the responsible role and level, the county, linked records and verified evidence. Its facts cannot be edited (`protect_escalation`), and closure needs a reason and a closer. |
+| `escalation_event` | Escalation history | Opened, acknowledged, assigned, investigation requested, escalated, comment, closed. Append-only. |
+| `conflict_rule` | Maps validation rules to conflict categories | The detection method and rule version shown to reviewers. |
+| `conflict_review_event` | What supervisors did about a conflict | Note, investigation assigned, GIS check requested, returned for correction, escalated. Append-only. Findings themselves are never edited. |
+
+The append-only tables share the trigger function `lais.forbid_history_change()`. Two settings were added: `workflow.supervisor_review` and `workflow.stage_targets_days` (see [workflow.md](workflow.md)). The notification categories now also include `task`, `escalation` and `review`.
+
 ### Views
 
 | View | Purpose |

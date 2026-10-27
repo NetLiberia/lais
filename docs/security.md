@@ -19,6 +19,24 @@ These limits are enforced by the API; the interface only reflects them. Integrat
 
 Privileged changes (account status, roles, profile, settings, county enablement and boundaries, document categories, backups) all require a written reason. The reason is stored in the audit event.
 
+## Limits on the supervisor
+
+Supervisors can be assigned to one county or nationally. Integration tests check each of these limits.
+
+| The supervisor cannot | How it is enforced |
+|---|---|
+| Approve, reject or publish a case | No supervisor role in `case.decide` and `case.publish`. Quality acceptance is a separate record (`supervisory_review`) with no legal effect; when the administrator requires it, it is an extra precondition on the registrar, never a substitute. |
+| Override a registrar's decision | No route changes a decided case. A supervisor's return is only possible while a case is `under_review`. |
+| Change ownership records or authoritative geometry | No `case.edit_rights`, `case.import_geometry` or publication rights. Published versions and rights are protected by triggers. |
+| See or act on another county | `supervision.*`, `task.*`, `escalation.*` and `conflict.review` are county-scoped. A county the client asks for is checked against the supervisor's own grants, and a refusal is audited. National views (admin dashboard, all users, full audit trail, admin reports) need a **national** grant: a county supervisor sees only their county's audit events. |
+| Widen their own scope or give themselves Administrator or Registrar rights | No `roles.assign`. The scope selector only narrows a query; the server ignores counties outside the grants. |
+| Resolve, dismiss or erase a spatial conflict | There is no such action. A conflict is resolved only by a registrar's acknowledgement, or by corrected data that no longer triggers the rule. Findings and review events are append-only. |
+| Bypass validation | Acceptance is refused while the latest validation has blocking errors or does not cover the current geometry. A return keeps the submission and its results. |
+| Delete tasks, reviews, escalations or audit history | Database triggers refuse UPDATE and DELETE on the history tables and on `audit.event`, and refuse deleting tasks and escalations. Cancellation and closure each need a reason. |
+| Give a task's assignee extra powers | A task is a work item. Assignment is limited to active staff with an eligible role in the task's county. |
+
+The record inspector in GIS review leaves out imported attributes whose names suggest personal data (names, holders, contacts, identity numbers). The work queue shows a count of proposed holders, never their names.
+
 ## Authentication
 
 - Passwords are hashed with scrypt (N=2^15, r=8, p=1, random salt). An account locks after 5 failed attempts.

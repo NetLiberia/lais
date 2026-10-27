@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { pool } from '../db.js';
 import { HttpError } from '../http.js';
 import { writeAudit } from '../audit.js';
-import { authorize } from '../authz/policy.js';
+import { authorize, scopeFor } from '../authz/policy.js';
 import { documentQuery } from '../openapi.js';
 
 /**
@@ -17,10 +17,13 @@ export const auditRouter = Router();
 const TECHNICAL_PREFIXES = ['auth.', 'admin.', 'authz.', 'staging.', 'county.', 'settings.', 'document_category.', 'backup.', 'report.', 'system.', 'audit.'];
 const CASE_STATUS_ACTIONS = ['case.create', 'case.submit', 'case.approve', 'case.reject', 'case.return', 'case.publish', 'case.withdraw'];
 
-function auditScope(req: Request): 'all' | 'technical' {
+/** 'all', 'technical' (administrators), or the counties a county-assigned supervisor may see. */
+function auditScope(req: Request): 'all' | 'technical' | number[] {
   const p = req.auth!.principal;
   if (authorize(p, 'audit.view_all').allowed) return 'all';
   if (authorize(p, 'audit.view_technical').allowed) return 'technical';
+  const counties = scopeFor(p, 'audit.view_county');
+  if (counties !== 'all' && counties.length > 0) return counties;
   throw new HttpError(403, 'This action requires the supervisor, auditor or system administrator role');
 }
 
@@ -59,11 +62,13 @@ auditRouter.get('/', async (req, res) => {
         AND ($9::date IS NULL OR e.at < $9::date + 1)
         AND ($10::boolean OR split_part(e.action, '.', 1) || '.' = ANY($11) OR e.action = ANY($12))
         AND ($13::bigint IS NULL OR e.chain_seq < $13)
+        AND ($15::smallint[] IS NULL OR e.county_id = ANY($15))
       ORDER BY e.chain_seq DESC LIMIT $14`,
     [q.action ?? null, q.outcome ?? null, q.caseId ?? null, q.actor ?? null, q.entityType ?? null, q.entityId ?? null,
-      q.countyId ?? null, q.from ?? null, q.to ?? null, scope === 'all', TECHNICAL_PREFIXES, CASE_STATUS_ACTIONS, q.before ?? null, q.limit],
+      q.countyId ?? null, q.from ?? null, q.to ?? null, scope !== 'technical', TECHNICAL_PREFIXES, CASE_STATUS_ACTIONS, q.before ?? null, q.limit,
+      Array.isArray(scope) ? scope : null],
   );
-  res.json({ scope, events: rows, nextBefore: rows.length === q.limit ? rows[rows.length - 1].chain_seq : null });
+  res.json({ scope: Array.isArray(scope) ? 'county' : scope, events: rows, nextBefore: rows.length === q.limit ? rows[rows.length - 1].chain_seq : null });
 });
 
 auditRouter.get('/verify', async (req, res) => {

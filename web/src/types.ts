@@ -183,3 +183,164 @@ export interface ParcelRecordResponse {
   disputes: ParcelDispute[];
   canManageDisputes: boolean;
 }
+
+// --- Supervision (/supervision, /tasks, /escalations) ---
+
+export type Priority = 'low' | 'normal' | 'high' | 'urgent';
+export type TaskStatus = 'unassigned' | 'assigned' | 'in_progress' | 'blocked' | 'returned' | 'completed' | 'cancelled';
+export type ConflictStatus = 'new' | 'investigating' | 'awaiting_correction' | 'escalated' | 'resolved' | 'closed';
+
+export interface SupervisionScope {
+  national: boolean;
+  counties: { id: number; code: string; name: string; enabled: boolean; boundary_status: string }[];
+  reviewMode: 'optional' | 'required';
+  stageTargets: Record<string, number> | null;
+  issueCategories: { code: string; label: string; applies_to: string }[];
+  taskTypes: { key: string; label: string; roles: string[] }[];
+  stages: { key: string; label: string; statuses: string[] }[];
+}
+
+export interface SupervisorSummary {
+  range: { from: string; to: string; countyId: number | null };
+  reviewMode: 'optional' | 'required';
+  applications_total: number; applications_open: number; awaiting_processing: number; awaiting_quality_review: number;
+  returned_for_correction: number; awaiting_registrar: number; under_review: number; overdue_tasks: number; tasks_completed: number;
+  avg_processing_days: string | null; decided_count: number; submissions_validated: number; submissions_passed: number;
+  unresolved_conflicts: number; quality_pass_rate: number | null; refreshedAt: string;
+}
+
+export interface WorkloadRow {
+  id: string; username: string; display_name: string; roles: string; assigned: number; active: number; blocked: number; overdue: number;
+  returned: number; awaiting_response: number; completed: number; avg_completion_hours: number | null; submissions_returned: number;
+  openByType: Record<string, number>;
+}
+
+export interface SupervisorCharts {
+  range: { from: string; to: string; countyId: number | null };
+  stages: { key: string; label: string; count: number }[];
+  workCompleted: { day: string; tasks_completed: number; stage_completions: number }[];
+  gisQuality: {
+    valid: number; invalid: number; warnings: number; duplicate_identifiers: number; invalid_geometries: number;
+    potential_overlaps: number; out_of_boundary: number; features: number; boundariesVerified: boolean;
+  };
+  stageDurations: { status: string; n: number; avgHours: number | null; medianHours: number | null }[];
+  staffWorkload: WorkloadRow[];
+  conflictStatus: { review_status: ConflictStatus; count: number }[];
+}
+
+export interface QueueItem {
+  id: string; case_no: string; case_type: CaseType; status: string; priority: Priority; due_date: string | null; created_at: string;
+  county_id: number; county_code: string; county_name: string; upi: string | null; stage: string; stage_since: string;
+  submitted_at: string | null; last_activity: string | null; opened_by: string; assignees: string | null; proposed_holders: number;
+  error_count: number | null; warning_count: number | null; quality_accepted: boolean; days_overdue: number | null;
+}
+export interface Paged<T> { items: T[]; total: number; page: number; pageSize: number }
+
+export interface SupervisedCase {
+  caseId: string; caseNo: string; countyId: number; status: string; stage: string; qualityAccepted: boolean; priority: Priority;
+  dueDate: string | null; reviewMode: 'optional' | 'required'; responsibleOfficer: { id: string; username: string; role: string } | null;
+  canReview: boolean; canSetPriority: boolean; acceptBlockedBy: string[];
+  reviews: {
+    id: string; decision: 'accepted' | 'returned' | 'info_requested'; issue_categories: string[]; affected_features: number[]; notes: string;
+    instructions: string | null; case_status: string; created_at: string; validation_run_id: string | null; reviewer: string;
+    task_no: string | null; task_status: TaskStatus | null; response: string | null;
+  }[];
+  tasks: { id: string; task_no: string; task_type: string; title: string; status: TaskStatus; priority: Priority; due_date: string | null; assignee: string | null }[];
+  escalations: { id: string; escalation_no: string; category: string; severity: string; status: string; responsible_role: string; title: string; created_at: string }[];
+  notes: { action: string; note: string; at: string; actor: string | null }[];
+}
+
+export interface GisQueueItem {
+  case_id: string; case_no: string; case_type: CaseType; case_status: string; county_id: number; county_code: string; batch_id: string;
+  source_filename: string; declared_srid: number; feature_count: number; imported_at: string; gis_officer: string; submitted_at: string | null;
+  run_id: string | null; run_at: string | null; error_count: number | null; warning_count: number | null; last_review: string | null;
+  accepted: boolean; valid_records: number; invalid_records: number; excluded_records: number; potential_conflicts: number;
+  review_status: 'awaiting_review' | 'accepted' | 'returned' | 'returned_by_validation' | 'not_submitted' | 'decided';
+  validation_status: 'not_validated' | 'failed' | 'passed_with_warnings' | 'passed';
+}
+
+export interface ReviewFinding extends Finding { group: string }
+export interface GisReviewDetail {
+  case: { id: string; caseNo: string; caseType: CaseType; status: string; countyId: number };
+  submission: {
+    id: string; source_filename: string; file_sha256: string; declared_srid: number; feature_count: number; status: string;
+    created_at: string; uploaded_by: string; sourceCrs: string; targetCrs: string;
+  } | null;
+  validation: { run: ValidationRun & { batch_id: string | null }; findings: ReviewFinding[]; summary: { group: string; errors: number; warnings: number }[] } | null;
+  records: {
+    feature_index: number; properties: Record<string, unknown>; structural_ok: boolean; structural_message: string | null; excluded: boolean;
+    exclusion_reason: string | null; geometry: Geometry; area_m2: string | null; geometry_type: string | null; errors: number; warnings: number;
+  }[];
+  county: { id: number; name: string; boundary_status: string; boundary_source: string | null; geometry: Geometry | null };
+  references: { id: string; upi: string; status: string; geometry: Geometry }[];
+  overlaps: { finding_id: string; code: string; feature_index: number; upi: string; geometry: Geometry; area_m2: string }[];
+  history: {
+    id: string; source_filename: string; status: string; created_at: string; feature_count: number; uploaded_by: string;
+    runs: { id: string; runAt: string; purpose: string; errors: number; warnings: number }[];
+  }[];
+  events: { action: string; from_status: string | null; to_status: string | null; note: string | null; at: string; actor: string | null }[];
+}
+
+export interface ConflictRow {
+  id: string; code: string; severity: 'error' | 'warning'; message: string; detail: Record<string, unknown> | null; feature_index: number | null;
+  related_parcel_id: string | null; related_case_id: string | null; acknowledged_at: string | null; acknowledgement_note: string | null;
+  acknowledged_by: string | null; run_id: string; batch_id: string | null; case_id: string; case_no: string; case_type: CaseType; case_status: string;
+  county_id: number; county_code: string; related_upi: string | null; related_case_no: string | null; case_parcel_upi: string | null;
+  proposed_upi: string | null; category: string; category_label: string; method: string; rule_version: string; detected_at: string;
+  last_update: string; in_latest_run: boolean; last_action: string | null; last_note: string | null; task_id: string | null; task_no: string | null;
+  task_status: TaskStatus | null; investigator: string | null; escalation_id: string | null; escalation_no: string | null;
+  escalation_status: string | null; review_status: ConflictStatus;
+}
+
+export interface ConflictDetail {
+  conflict: ConflictRow;
+  occurrences: { id: string; severity: string; message: string; detail: Record<string, unknown> | null; run_at: string; purpose: string; acknowledged_at: string | null; acknowledgement_note: string | null }[];
+  events: { id: string; action: string; note: string; at: string; actor: string; task_no: string | null; escalation_no: string | null }[];
+  tasks: { id: string; task_no: string; task_type: string; status: TaskStatus; due_date: string | null; assignee: string | null; completion_note: string | null }[];
+  escalations: { id: string; escalation_no: string; status: string; severity: string; responsible_role: string; created_at: string; closure_reason: string | null }[];
+  evidence: { feature: Geometry | null; related_parcel: Geometry | null; intersection: Geometry | null; intersection_m2: string | null; feature_m2: string | null } | null;
+}
+
+export interface TaskRow {
+  id: string; task_no: string; task_type: string; title: string; status: TaskStatus; priority: Priority; due_date: string | null;
+  created_at: string; updated_at: string; completed_at: string | null; county_id: number; county_code: string; case_id: string | null;
+  case_no: string | null; assignee_id: string | null; assignee: string | null; created_by: string; overdue: boolean; days_overdue: number | null;
+}
+
+export interface TaskDetail {
+  task: TaskRow & {
+    description: string | null; instructions: string | null; reference: string | null; county_name: string; created_by_username: string;
+    source_filename: string | null; finding_code: string | null; finding_message: string | null; completion_note: string | null;
+    cancel_reason: string | null; type_label: string; started_at: string | null;
+  };
+  events: { id: string; action: string; from_value: string | null; to_value: string | null; note: string | null; reference: string | null; at: string; actor: string }[];
+  permitted: { moves: TaskStatus[]; assign: boolean; edit: boolean; comment: boolean; followUp: boolean };
+}
+
+export interface StaffOption { id: string; username: string; display_name: string; roles: string[] }
+
+export interface EscalationRow {
+  id: string; escalation_no: string; category: string; severity: 'low' | 'medium' | 'high' | 'critical';
+  status: 'open' | 'acknowledged' | 'investigating' | 'closed'; responsible_role: string; responsible_level: 'county' | 'national';
+  title: string; county_id: number; county_code: string; case_id: string | null; case_no: string | null; upi: string | null;
+  created_at: string; updated_at: string; created_by: string; assignee: string | null; responsible: boolean;
+}
+export interface EscalationDetail {
+  escalation: EscalationRow & {
+    description: string; evidence: { type: string; reference: string; note?: string }[]; county_name: string; task_no: string | null;
+    task_status: string | null; finding_code: string | null; created_by_username: string; closed_at: string | null;
+    closed_by_username: string | null; closure_reason: string | null;
+  };
+  events: { id: string; action: string; from_status: string | null; to_status: string | null; note: string | null; at: string; actor: string }[];
+  permitted: {
+    acknowledge: boolean; assign: boolean; investigate: boolean; escalate: boolean; comment: boolean; close: boolean;
+    targets: { role: string; level: 'county' | 'national' }[];
+  };
+}
+
+export interface ReportColumn { key: string; label: string; kind: 'value' | 'count' | 'derived' }
+export interface ReportResult {
+  reportId: string; key: string; title: string; description: string; generatedAt: string; generatedBy: string; scope: string;
+  filters: { from: string; to: string; stage: string | null; taskType: string | null; role: string | null };
+  dataNotice: string; columns: ReportColumn[]; rows: Record<string, unknown>[];
+}

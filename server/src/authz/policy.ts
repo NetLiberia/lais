@@ -1,4 +1,4 @@
-import { EDITABLE_STATUSES, RIGHTS_CASE_TYPES, SPATIAL_CASE_TYPES, type CaseStatus, type CaseType } from './workflow.js';
+import { EDITABLE_STATUSES, OPEN_STATUSES, RIGHTS_CASE_TYPES, SPATIAL_CASE_TYPES, type CaseStatus, type CaseType } from './workflow.js';
 
 /**
  * Role-based access control combined with jurisdiction, record status and
@@ -32,8 +32,12 @@ export interface Principal {
 
 interface Rule {
   roles: readonly Role[];
-  /** 'county' rules require a resource county that one of the matching grants covers. */
-  scope: 'county' | 'global';
+  /**
+   * 'county' rules require a resource county that one of the matching grants covers.
+   * 'national' rules require a matching grant with no county: they reveal data from every county.
+   * 'global' rules need only the role (reference data, or roles that are national by design).
+   */
+  scope: 'county' | 'national' | 'global';
   statuses?: readonly CaseStatus[];
   caseTypes?: readonly CaseType[];
   separation?: 'not_contributor' | 'creator_only';
@@ -74,19 +78,37 @@ const RULES = {
   'party.view_sensitive': { roles: ['processor', 'registrar'], scope: 'global' },
 
   // Oversight and administration. Administrators run the platform; none of these confer legal authority.
-  'audit.view_all': { roles: ['supervisor', 'auditor'], scope: 'global' },
+  // National data is open only to national grants: a county supervisor uses the supervision views instead.
+  'audit.view_all': { roles: ['supervisor', 'auditor'], scope: 'national' },
+  'audit.view_county': { roles: ['supervisor'], scope: 'county' },
   'audit.view_technical': { roles: ['system_admin'], scope: 'global' },
   'user.manage': { roles: ['system_admin'], scope: 'global' },
-  'users.read': { roles: ['system_admin', 'supervisor'], scope: 'global' },
+  'users.read': { roles: ['system_admin', 'supervisor'], scope: 'national' },
   'roles.assign': { roles: ['system_admin'], scope: 'global' },
   'counties.read': { roles: ['system_admin', 'supervisor', 'auditor', 'gis_officer', 'processor', 'registrar'], scope: 'global' },
   'counties.manage': { roles: ['system_admin'], scope: 'global' },
-  'dashboard.view': { roles: ['system_admin', 'supervisor'], scope: 'global' },
-  'gis.sync.read': { roles: ['system_admin', 'supervisor'], scope: 'global' },
-  'system.health': { roles: ['system_admin', 'supervisor'], scope: 'global' },
+  'dashboard.view': { roles: ['system_admin', 'supervisor'], scope: 'national' },
+  'gis.sync.read': { roles: ['system_admin', 'supervisor'], scope: 'national' },
+  'system.health': { roles: ['system_admin', 'supervisor'], scope: 'national' },
   'system.configure': { roles: ['system_admin'], scope: 'global' },
   'backups.run': { roles: ['system_admin'], scope: 'global' },
-  'reports.export': { roles: ['system_admin', 'supervisor'], scope: 'global' },
+  'reports.export': { roles: ['system_admin', 'supervisor'], scope: 'national' },
+
+  // Supervision: operational oversight and quality control. Quality acceptance is not legal approval,
+  // and nothing here lets a supervisor decide, publish, edit geometry or rights, or close a finding.
+  'supervision.view': { roles: ['supervisor'], scope: 'county' },
+  'supervision.review': { roles: ['supervisor'], scope: 'county', statuses: ['under_review'] },
+  'supervision.set_priority': { roles: ['supervisor'], scope: 'county', statuses: OPEN_STATUSES },
+  'conflict.review': { roles: ['supervisor'], scope: 'county' },
+  'task.view': { roles: ['supervisor', 'gis_officer', 'processor', 'registrar', 'auditor'], scope: 'county' },
+  'task.manage': { roles: ['supervisor'], scope: 'county' },
+  'task.work': { roles: ['gis_officer', 'processor', 'supervisor'], scope: 'county' },
+  'escalation.view': { roles: ['supervisor', 'registrar', 'auditor'], scope: 'county' },
+  'escalation.view_system': { roles: ['system_admin'], scope: 'global' },
+  'escalation.create': { roles: ['supervisor', 'registrar', 'gis_officer', 'processor'], scope: 'county' },
+  'escalation.manage': { roles: ['supervisor', 'registrar'], scope: 'county' },
+  'escalation.manage_system': { roles: ['system_admin'], scope: 'global' },
+  'reports.supervision': { roles: ['supervisor', 'auditor'], scope: 'county' },
 
   // Document requests from landowners (status rules are enforced by the route and a database trigger)
   'docrequest.view': { roles: ['processor', 'registrar', 'supervisor', 'auditor'], scope: 'county' },
@@ -138,6 +160,20 @@ export const ACTION_DESCRIPTIONS: Record<Action, string> = {
   'system.configure': 'Change non-legal system settings and document categories',
   'backups.run': 'Start a database backup',
   'reports.export': 'Export administrative reports (no personal data)',
+  'audit.view_county': 'View audit events of an assigned county',
+  'supervision.view': 'View operational dashboards, work queues, GIS submissions and conflicts in an assigned county',
+  'supervision.review': 'Record a quality review of a submitted case: accept, return for correction, or request information (not a legal decision)',
+  'supervision.set_priority': 'Set the operational priority and due date of an open case',
+  'conflict.review': 'Record notes on spatial conflicts and request investigations or GIS checks (cannot resolve or dismiss them)',
+  'task.view': 'View operational tasks in an assigned county',
+  'task.manage': 'Create, assign, reassign, reprioritise, return and cancel operational tasks',
+  'task.work': 'Work on tasks assigned to oneself: start, block, comment and complete',
+  'escalation.view': 'View escalations in an assigned county',
+  'escalation.view_system': 'View escalations routed to system administration',
+  'escalation.create': 'Raise an escalation in an assigned county',
+  'escalation.manage': 'Acknowledge, assign, investigate, escalate further and close escalations they are responsible for',
+  'escalation.manage_system': 'Act on escalations routed to system administration',
+  'reports.supervision': 'Generate operational quality and compliance reports for an assigned county',
   'docrequest.view': 'View landowner document requests',
   'docrequest.prepare': 'Prepare documents for release to a landowner',
   'docrequest.decide': 'Approve or refuse a document release',
@@ -165,7 +201,7 @@ export function permissionMatrix() {
 export function capabilities(principal: Principal): Action[] {
   return ACTIONS.filter((a) => {
     const rule: Rule = RULES[a];
-    return principal.grants.some((g) => rule.roles.includes(g.role));
+    return principal.grants.some((g) => rule.roles.includes(g.role) && (rule.scope !== 'national' || g.countyId === null));
   });
 }
 
@@ -192,6 +228,10 @@ export function authorize(principal: Principal | null | undefined, action: Actio
 
   const grants = principal.grants.filter((g) => rule.roles.includes(g.role));
   if (grants.length === 0) return deny(`This action requires one of these roles: ${rule.roles.join(', ')}`);
+
+  if (rule.scope === 'national' && !grants.some((g) => g.countyId === null)) {
+    return deny('This view covers every county and needs a national assignment');
+  }
 
   if (rule.scope === 'county') {
     // Fail closed: an unknown jurisdiction is never treated as "any county".

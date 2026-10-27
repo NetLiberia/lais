@@ -50,7 +50,12 @@ LAIS-Liberia is a research prototype of a land administration information system
 ## Roles
 
 - **System administrator:** accounts, roles, counties, settings, document categories, backups, reports and system health. The role carries no land-record authority.
-- **Supervisor:** national read-only oversight, with a read-only view of accounts.
+- **Supervisor:** operational oversight and quality control for one county or nationally:
+  - dashboards and the work queue;
+  - GIS quality review (accept, return, request information) and conflict review;
+  - tasks, escalations and operational reports.
+
+  A national supervisor also has read-only views of accounts and the national dashboards. Supervisors have no legal authority; see [workflow.md](workflow.md).
 - **GIS officer:** county-scoped. Imports geometry into staging and runs validation.
 - **LAIS processor:** county-scoped. Records rights and documents, and verifies documents uploaded by colleagues.
 - **Land registrar:** county-scoped. Takes the legal decision (approve, return or reject) and publishes. Never on a case they helped prepare.
