@@ -1,32 +1,67 @@
+import type React from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import type { ReactNode } from 'react';
-import { INTERNAL_ROLES, useAuth } from './auth';
+import { lazy, Suspense, type ReactNode } from 'react';
+import { INTERNAL_ROLES, STAFF_ROLES, useAuth } from './auth';
 import { ROLE_LABELS } from './api';
 import { PublicPortal } from './pages/PublicPortal';
 import { Login } from './pages/Login';
 import { SecondFactor } from './pages/SecondFactor';
-import { CaseList } from './pages/CaseList';
-import { NewCase } from './pages/NewCase';
-import { CaseDetail } from './pages/CaseDetail';
-import { ParcelRecord } from './pages/ParcelRecord';
-import { Parties } from './pages/Parties';
-import { AuditLog } from './pages/AuditLog';
-import { AdminUsers } from './pages/AdminUsers';
-import { MyParcels } from './pages/MyParcels';
-import { Account } from './pages/Account';
-import { DocumentRequestDetail, DocumentRequestList } from './pages/DocumentRequests';
+import { Skeleton } from './components/kit';
+
+// Administration pages (and the charting library) load only when opened, keeping the public and
+// landowner portals small for slow connections.
+// The export name is checked against the module at compile time.
+const named = <M, K extends keyof M>(load: () => Promise<M>, name: K) =>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  lazy(() => load().then((m) => ({ default: m[name] as React.ComponentType<any> })));
+// Staff, landowner and account pages also load on demand: the public map ships alone.
+const AppShell = named(() => import('./shell/AppShell'), 'AppShell');
+const CompleteAccount = named(() => import('./pages/CompleteAccount'), 'CompleteAccount');
+const CaseList = named(() => import('./pages/CaseList'), 'CaseList');
+const NewCase = named(() => import('./pages/NewCase'), 'NewCase');
+const CaseDetail = named(() => import('./pages/CaseDetail'), 'CaseDetail');
+const ParcelRecord = named(() => import('./pages/ParcelRecord'), 'ParcelRecord');
+const Parties = named(() => import('./pages/Parties'), 'Parties');
+const AuditLog = named(() => import('./pages/AuditLog'), 'AuditLog');
+const MyParcels = named(() => import('./pages/MyParcels'), 'MyParcels');
+const Account = named(() => import('./pages/Account'), 'Account');
+const DocumentRequestList = named(() => import('./pages/DocumentRequests'), 'DocumentRequestList');
+const DocumentRequestDetail = named(() => import('./pages/DocumentRequests'), 'DocumentRequestDetail');
+const AdminDashboard = named(() => import('./pages/admin/AdminDashboard'), 'AdminDashboard');
+const UsersPage = named(() => import('./pages/admin/UsersPage'), 'UsersPage');
+const RolesPage = named(() => import('./pages/admin/RolesPage'), 'RolesPage');
+const CountiesPage = named(() => import('./pages/admin/CountiesPage'), 'CountiesPage');
+const ApplicationsOverview = named(() => import('./pages/admin/Overviews'), 'ApplicationsOverview');
+const ParcelsOverview = named(() => import('./pages/admin/Overviews'), 'ParcelsOverview');
+const ConflictsOverview = named(() => import('./pages/admin/Overviews'), 'ConflictsOverview');
+const GisSyncPage = named(() => import('./pages/admin/GisSyncPage'), 'GisSyncPage');
+const AdminAuditPage = named(() => import('./pages/admin/SystemPages'), 'AdminAuditPage');
+const DocumentCategoriesPage = named(() => import('./pages/admin/SystemPages'), 'DocumentCategoriesPage');
+const HealthPage = named(() => import('./pages/admin/SystemPages'), 'HealthPage');
+const HelpPage = named(() => import('./pages/admin/SystemPages'), 'HelpPage');
+const ReportsPage = named(() => import('./pages/admin/SystemPages'), 'ReportsPage');
+const SettingsPage = named(() => import('./pages/admin/SystemPages'), 'SettingsPage');
 
 const DOCREQUEST_ROLES = ['processor', 'registrar', 'supervisor', 'auditor'];
 
-function RequireSession({ roles, children }: { roles?: string[]; children: ReactNode }) {
-  const { session, hasRole } = useAuth();
+/**
+ * Route guard. Convenience only: it decides what to render, while the API enforces every permission and
+ * county scope regardless of what the interface shows. `needs` lists capabilities (any one suffices).
+ */
+function RequireSession({ roles, needs, children }: { roles?: string[]; needs?: string[]; children: ReactNode }) {
+  const { session, hasRole, can } = useAuth();
   const location = useLocation();
   if (!session) return <p className="muted pad">Loading…</p>;
-  if (!session.authenticated) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  if (!session.authenticated) return <Navigate to="/login" state={{ from: location.pathname + location.search }} replace />;
   if (session.state !== 'active') return <Navigate to="/mfa" replace />;
-  // Convenience only: the API enforces every permission regardless of what the UI shows.
-  if (roles && !hasRole(...roles)) return <p className="pad">Your account does not have access to this workspace.</p>;
-  return <>{children}</>;
+  const allowed = (!roles || hasRole(...roles)) && (!needs || can(...needs));
+  const content = allowed
+    ? <Suspense fallback={<div className="pad"><Skeleton lines={6} /></div>}>{children}</Suspense>
+    : <div className="pad"><h1>No access</h1><p>Your account does not have access to this area.</p></div>;
+  const loading = <div className="pad"><Skeleton lines={6} /></div>;
+  return hasRole(...STAFF_ROLES)
+    ? <Suspense fallback={loading}><AppShell>{content}</AppShell></Suspense>
+    : <><Header /><main><Suspense fallback={loading}>{content}</Suspense></main></>;
 }
 
 /** Sends a signed-in user to the workspace that matches their role. */
@@ -35,39 +70,32 @@ function Start() {
   if (!session) return null;
   if (!session.authenticated) return <Navigate to="/login" replace />;
   if (session.state !== 'active') return <Navigate to="/mfa" replace />;
+  if (hasRole('system_admin')) return <Navigate to="/admin" replace />;
   if (hasRole(...INTERNAL_ROLES)) return <Navigate to="/work" replace />;
-  if (hasRole('system_admin')) return <Navigate to="/work/admin" replace />;
   if (hasRole('landowner')) return <Navigate to="/me" replace />;
   return <Navigate to="/" replace />;
 }
 
+/** Header for the public portal, sign-in pages and the landowner portal. Staff use the application shell. */
 function Header() {
   const { session, logout, hasRole } = useAuth();
   const active = session?.authenticated && session.state === 'active';
   return (
     <header className="topbar">
       <div className="brand">
-        <strong>LAIS</strong>
+        <strong>LAIS-Liberia</strong>
         <span className="badge warn">Research prototype · synthetic data only</span>
       </div>
       <nav>
         <NavLink to="/" end>Public map</NavLink>
-        {active && hasRole(...INTERNAL_ROLES) && <NavLink to="/work">Cases</NavLink>}
-        {active && hasRole(...DOCREQUEST_ROLES) && <NavLink to="/work/document-requests">Document requests</NavLink>}
-        {active && hasRole('processor', 'registrar') && <NavLink to="/work/parties">Parties</NavLink>}
-        {active && hasRole('supervisor', 'auditor', 'system_admin') && <NavLink to="/work/audit">Audit</NavLink>}
-        {active && hasRole('system_admin') && <NavLink to="/work/admin">Users</NavLink>}
+        {active && hasRole(...STAFF_ROLES) && <NavLink to="/start">Staff workspace</NavLink>}
         {active && hasRole('landowner') && <NavLink to="/me">My land</NavLink>}
       </nav>
       <div className="who">
         {active ? (
           <>
-            <NavLink to="/account" title="Account and security">
-              {session!.user!.displayName}
-            </NavLink>
-            <small>
-              {session!.grants!.map((g) => `${ROLE_LABELS[g.role] ?? g.role}${g.county ? ` (${g.county.code})` : ''}`).join(', ')}
-            </small>
+            <NavLink to="/account" title="Account and security">{session!.user!.displayName}</NavLink>
+            <small>{session!.grants!.map((g) => `${ROLE_LABELS[g.role] ?? g.role}${g.county ? ` (${g.county.code})` : ''}`).join(', ')}</small>
             <button className="link" onClick={() => void logout()}>Sign out</button>
           </>
         ) : (
@@ -78,30 +106,47 @@ function Header() {
   );
 }
 
+function Plain({ children }: { children: ReactNode }) {
+  return <><Header /><main><Suspense fallback={<div className="pad"><Skeleton lines={4} /></div>}>{children}</Suspense></main></>;
+}
+
 export function App() {
   return (
-    <>
-      <Header />
-      <main>
-        <Routes>
-          <Route path="/" element={<PublicPortal />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/mfa" element={<SecondFactor />} />
-          <Route path="/start" element={<Start />} />
-          <Route path="/account" element={<RequireSession><Account /></RequireSession>} />
-          <Route path="/work" element={<RequireSession roles={INTERNAL_ROLES}><CaseList /></RequireSession>} />
-          <Route path="/work/cases/new" element={<RequireSession roles={['gis_officer', 'processor']}><NewCase /></RequireSession>} />
-          <Route path="/work/cases/:id" element={<RequireSession roles={INTERNAL_ROLES}><CaseDetail /></RequireSession>} />
-          <Route path="/work/parcels/:upi" element={<RequireSession roles={INTERNAL_ROLES}><ParcelRecord /></RequireSession>} />
-          <Route path="/work/document-requests" element={<RequireSession roles={DOCREQUEST_ROLES}><DocumentRequestList /></RequireSession>} />
-          <Route path="/work/document-requests/:id" element={<RequireSession roles={DOCREQUEST_ROLES}><DocumentRequestDetail /></RequireSession>} />
-          <Route path="/work/parties" element={<RequireSession roles={['processor', 'registrar']}><Parties /></RequireSession>} />
-          <Route path="/work/audit" element={<RequireSession roles={['supervisor', 'auditor', 'system_admin']}><AuditLog /></RequireSession>} />
-          <Route path="/work/admin" element={<RequireSession roles={['system_admin']}><AdminUsers /></RequireSession>} />
-          <Route path="/me" element={<RequireSession roles={['landowner']}><MyParcels /></RequireSession>} />
-          <Route path="*" element={<p className="pad">Page not found.</p>} />
-        </Routes>
-      </main>
-    </>
+    <Routes>
+      <Route path="/" element={<Plain><PublicPortal /></Plain>} />
+      <Route path="/login" element={<Plain><Login /></Plain>} />
+      <Route path="/mfa" element={<Plain><SecondFactor /></Plain>} />
+      <Route path="/account/complete" element={<Plain><CompleteAccount /></Plain>} />
+      <Route path="/start" element={<Start />} />
+      <Route path="/account" element={<RequireSession><Account /></RequireSession>} />
+      <Route path="/help" element={<RequireSession><HelpPage /></RequireSession>} />
+
+      <Route path="/admin" element={<RequireSession needs={['dashboard.view']}><AdminDashboard /></RequireSession>} />
+      <Route path="/admin/users" element={<RequireSession needs={['users.read']}><UsersPage /></RequireSession>} />
+      <Route path="/admin/roles" element={<RequireSession needs={['users.read']}><RolesPage /></RequireSession>} />
+      <Route path="/admin/counties" element={<RequireSession needs={['counties.manage']}><CountiesPage /></RequireSession>} />
+      <Route path="/admin/applications" element={<RequireSession needs={['dashboard.view']}><ApplicationsOverview /></RequireSession>} />
+      <Route path="/admin/parcels" element={<RequireSession needs={['dashboard.view']}><ParcelsOverview /></RequireSession>} />
+      <Route path="/admin/conflicts" element={<RequireSession needs={['dashboard.view']}><ConflictsOverview /></RequireSession>} />
+      <Route path="/admin/gis-sync" element={<RequireSession needs={['gis.sync.read']}><GisSyncPage /></RequireSession>} />
+      <Route path="/admin/document-categories" element={<RequireSession needs={['system.configure']}><DocumentCategoriesPage /></RequireSession>} />
+      <Route path="/admin/reports" element={<RequireSession needs={['reports.export']}><ReportsPage /></RequireSession>} />
+      <Route path="/admin/audit" element={<RequireSession needs={['audit.view_technical', 'audit.view_all']}><AdminAuditPage /></RequireSession>} />
+      <Route path="/admin/health" element={<RequireSession needs={['system.health']}><HealthPage /></RequireSession>} />
+      <Route path="/admin/settings" element={<RequireSession needs={['system.configure']}><SettingsPage /></RequireSession>} />
+
+      <Route path="/work" element={<RequireSession roles={INTERNAL_ROLES}><CaseList /></RequireSession>} />
+      <Route path="/work/cases/new" element={<RequireSession roles={['gis_officer', 'processor']}><NewCase /></RequireSession>} />
+      <Route path="/work/cases/:id" element={<RequireSession roles={INTERNAL_ROLES}><CaseDetail /></RequireSession>} />
+      <Route path="/work/parcels/:upi" element={<RequireSession roles={INTERNAL_ROLES}><ParcelRecord /></RequireSession>} />
+      <Route path="/work/document-requests" element={<RequireSession roles={DOCREQUEST_ROLES}><DocumentRequestList /></RequireSession>} />
+      <Route path="/work/document-requests/:id" element={<RequireSession roles={DOCREQUEST_ROLES}><DocumentRequestDetail /></RequireSession>} />
+      <Route path="/work/parties" element={<RequireSession roles={['processor', 'registrar']}><Parties /></RequireSession>} />
+      <Route path="/work/audit" element={<RequireSession roles={['supervisor', 'auditor']}><AuditLog /></RequireSession>} />
+      {/* Old address of the user list. */}
+      <Route path="/work/admin" element={<Navigate to="/admin/users" replace />} />
+      <Route path="/me" element={<RequireSession roles={['landowner']}><MyParcels /></RequireSession>} />
+      <Route path="*" element={<Plain><p className="pad">Page not found.</p></Plain>} />
+    </Routes>
   );
 }

@@ -6,6 +6,8 @@ interface AuthValue {
   refresh: () => Promise<void>;
   logout: () => Promise<void>;
   hasRole: (...roles: string[]) => boolean;
+  /** True if the account may perform any of the actions somewhere (interface only; the server decides). */
+  can: (...actions: string[]) => boolean;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -33,7 +35,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [session],
   );
 
-  return <AuthContext.Provider value={{ session, refresh, logout, hasRole }}>{children}</AuthContext.Provider>;
+  const can = useCallback(
+    (...actions: string[]) => !!session?.capabilities?.some((c) => actions.includes(c)),
+    [session],
+  );
+
+  return <AuthContext.Provider value={{ session, refresh, logout, hasRole, can }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthValue {
@@ -43,3 +50,5 @@ export function useAuth(): AuthValue {
 }
 
 export const INTERNAL_ROLES = ['gis_officer', 'processor', 'registrar', 'supervisor', 'auditor'];
+/** Roles that work inside the staff application shell. */
+export const STAFF_ROLES = [...INTERNAL_ROLES, 'system_admin'];

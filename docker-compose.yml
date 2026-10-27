@@ -1,0 +1,56 @@
+# LAIS-Liberia demonstration stack: PostGIS, API and web front end.
+# UNVERIFIED: not yet run (no Docker on the development machine). See docs/install-docker.md.
+#
+#   copy .env.compose.example .env      (then fill in the values; .env is never committed)
+#   docker compose up --build
+#   docker compose run --rm api npx tsx src/seed.ts      (synthetic demo data, once)
+#   open http://localhost:8080
+#
+# This is a demonstration setup over plain HTTP on one machine. It is not a production deployment:
+# production needs HTTPS termination, NODE_ENV=production (Secure cookies), managed secrets,
+# off-host backups and monitoring.
+
+services:
+  db:
+    image: postgis/postgis:15-3.4
+    environment:
+      POSTGRES_DB: lais
+      POSTGRES_USER: lais_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lais_owner -d lais"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Not published to the host: only the API reaches the database.
+
+  api:
+    build: { context: ., target: api }
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgres://lais_owner:${POSTGRES_PASSWORD}@db:5432/lais
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?Set MFA_ENCRYPTION_KEY in .env}
+      MFA_ENFORCED: ${MFA_ENFORCED:-false}
+      SEED_PASSWORD: ${SEED_PASSWORD:-}
+      PG_DUMP_PATH: pg_dump
+      BACKUP_DIR: storage/backups
+      DOCUMENT_STORAGE_DIR: storage/documents
+      TRUST_PROXY: 1
+    volumes:
+      - storage:/app/server/storage
+    # Not published: nginx in the web service proxies /api.
+
+  web:
+    build: { context: ., target: web }
+    depends_on: [api]
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
+  storage:

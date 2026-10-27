@@ -29,6 +29,11 @@ Phase 3 prototype for the MSc project *Development and Evaluation of a Privacy-A
 | Authentication: scrypt hashes, progressive lockout, sign-in rate limits per account (plus a generous per-address ceiling, so offices sharing one connection are not locked out), server-side sessions (hash-only token storage), CSRF tokens, optional mandatory TOTP MFA for privileged roles | `server/src/auth/*`, `routes/auth.ts` |
 | Append-only, hash-chained audit log with tamper detection | `003_audit.sql`, `routes/audit.ts` |
 | Landowner portal: only interests registered to parties linked to the account by staff | `routes/me.ts`, `pages/MyParcels.tsx` |
+| Administrator dashboard: live summary cards and charts with click-through, recent activity and system health from real checks. Every number comes from the database | `pages/admin/AdminDashboard.tsx`, `routes/adminOps.ts` |
+| User management without the administrator ever handling passwords: invited accounts, one-time activation and reset links, roles with county scope, suspension with reasons, last-administrator and self-change protection, and an audited staff export | `pages/admin/UsersPage.tsx`, `routes/admin.ts`, `009_admin_foundation.sql` |
+| County management for all 15 counties: no invented boundaries, provisional imports, verification with provenance, and enablement gating new cases | `pages/admin/CountiesPage.tsx` |
+| GIS synchronization monitoring, settings, document categories, backups with a restore check, CSV reports, in-app notifications, global search, and an audit view limited to technical events | `pages/admin/`, `routes/adminOps.ts` |
+| OpenAPI 3.1 description generated from the routers (`/api/openapi.json`), structured JSON logs and request correlation IDs | `openapi.ts`, `logger.ts` |
 | Landowner document requests: a landowner asks for copies on a parcel where they hold a registered interest; a processor chooses verified documents from published cases; a different registrar approves or refuses with a reason; copies can be downloaded for `DOCUMENT_RELEASE_DAYS`. Eligibility is re-checked at every download, highly sensitive documents are never released (enforced in the database too), and every download is audited | `routes/me.ts`, `routes/documentRequests.ts`, `005_document_requests.sql` |
 
 ## Architecture
@@ -42,7 +47,18 @@ server/ Node.js + Express 5 + TypeScript
         ├─ src/services   validation, publication, snapshot, GeoJSON intake
         └─ db/migrations  lais (registry), staging (GIS submissions), audit (hash chain)
 PostgreSQL + PostGIS — the authoritative store. ArcGIS / QGIS feed it only through staging.
+e2e/    Playwright browser walkthroughs (npm run e2e)
 ```
+
+More detail is in [docs/](docs/):
+- [architecture](docs/architecture.md)
+- [database schema](docs/database-schema.md)
+- [permission matrix](docs/permission-matrix.md), generated from the code
+- [security and privacy](docs/security.md)
+- [GIS synchronization](docs/gis-sync.md)
+- [backup and restore](docs/backup-restore.md)
+- [Docker Compose](docs/install-docker.md) (unverified)
+- [implementation status](docs/status.md)
 
 ## Setup on Windows
 
@@ -65,7 +81,7 @@ CREATE EXTENSION postgis;
 
 Creating the extension as `postgres` means the app's own account does not need superuser rights.
 
-**Shortcut:** once PostgreSQL is running, `powershell -ExecutionPolicy Bypass -File serverscriptssetup-local-db.ps1` does steps 1.3 and 2 for you. It prompts for the `postgres` password and a new `lais_owner` password, creates both databases with PostGIS, and writes `server/.env`. Passwords are typed into the script, not stored in any shared file.
+**Shortcut:** once PostgreSQL is running, `powershell -ExecutionPolicy Bypass -File server\scripts\setup-local-db.ps1` does steps 1.3 and 2 for you. It prompts for the `postgres` password and a new `lais_owner` password, creates both databases with PostGIS, and writes `server/.env`. Passwords are typed into the script, not stored in any shared file.
 
 ### 2. Configure
 
@@ -78,6 +94,7 @@ Edit `server/.env`:
 - `MFA_ENCRYPTION_KEY`: generate with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
 - `SEED_PASSWORD`: at least 12 characters; every demo account gets this password
 - `TEST_DATABASE_URL=postgres://lais_owner:choose-a-password@localhost:5432/lais_test` (optional)
+- `PG_DUMP_PATH=C:/Program Files/PostgreSQL/18/bin/pg_dump.exe` if you want backups from the Settings page
 
 ### 3. Install, migrate, seed, run
 
@@ -99,10 +116,14 @@ If another app already uses port 4000 or 5173, set `PORT=4100` in `server/.env` 
 npm test
 ```
 
-- **38 unit tests**: permission matrix, cross-county denial, separation of duties, workflow (including a check that the TypeScript transition table matches the SQL trigger), TOTP RFC test vectors, password hashing, GeoJSON/CRS intake, fractional shares, file sniffing.
-- **70 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration, transfer, subdivision, consolidation, correction, legacy-migration and confirmation lifecycles, landowner document requests, rate limits, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, and admin limits. Two concurrency tests run only against a real multi-connection server. One publishes two overlapping parcels at the same moment and checks that the per-county lock lets only one through (verified to fail with the lock removed). The other checks that the audit hash chain survives 40 parallel writers.
+- **42 unit tests**: permission matrix (and a check that `docs/permission-matrix.md` matches it), CSV formula safety, cross-county denial, separation of duties, workflow (including a check that the TypeScript transition table matches the SQL trigger), TOTP RFC test vectors, password hashing, GeoJSON/CRS intake, fractional shares, file sniffing.
+- **93 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration, transfer, subdivision, consolidation, correction, legacy-migration and confirmation lifecycles, landowner document requests, rate limits, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, administrator limits, the account lifecycle (invitation, activation, reset, suspension), the dashboard figures against the database, county enablement, settings, backups, reports, and the OpenAPI description. Two concurrency tests run only against a real multi-connection server. One publishes two overlapping parcels at the same moment and checks that the per-county lock lets only one through (verified to fail with the lock removed). The other checks that the audit hash chain survives 40 parallel writers.
 
-Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 108 tests in about 12 seconds with the default 10-connection pool, plus six scripted browser walkthroughs.
+Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 135 tests in about 26 seconds with the default 10-connection pool.
+
+**Browser walkthroughs.** With the API and web app running, `npm run e2e` drives Microsoft Edge through seven scripted journeys: registration, subdivision, document requests, corrections, legacy migration, confirmation, and the administrator dashboard. It resets the development database before each one. Set `LAIS_WEB_URL` if the web app is not on port 5173, and `BROWSER_PATH` for another Chromium browser. Screenshots go to `e2e/shots/`. Last run: 80 steps, 0 problems.
+
+**Backups.** `npm run backup:verify -w server -- <file>` restores a backup into `TEST_DATABASE_URL` and checks it (see [docs/backup-restore.md](docs/backup-restore.md)).
 
 ## Demo accounts (synthetic)
 
@@ -110,7 +131,7 @@ All use `SEED_PASSWORD`.
 
 | Username | Role | Scope |
 |---|---|---|
-| `admin` | System administrator (accounts only, no land decisions) | national |
+| `admin` | System administrator: dashboard, accounts, counties and settings; no land decisions | national |
 | `gis.mo`, `gis.mg` | GIS officer | Montserrado / Margibi |
 | `proc.mo`, `proc2.mo`, `proc.mg` | LAIS processor | Montserrado / Margibi |
 | `reg.mo`, `reg.mg` | Land registrar | Montserrado / Margibi |
@@ -149,4 +170,4 @@ Other fixtures: `adjacent_touching` (expected: no conflict), `duplicate_of_mo5`,
 - Conflict tolerances (`OVERLAP_TOLERANCE_M2`, `DUPLICATE_HAUSDORFF_M`, `MIN_PARCEL_AREA_M2`, `COVERAGE_TOLERANCE_M2`) and the public field list (`PUBLIC_PARCEL_FIELDS`) are placeholders until the cadastral authority and the disclosure policy define them.
 - The audit chain resists tampering by application users, but a database superuser can still alter it. For higher assurance, run `server/db/roles.sql` so the app uses a least-privilege role, and ship events to a separate log store.
 - Map tiles come from OpenStreetMap's public servers, so the browser fetches them from the internet.
-- Not security-audited, load-tested or usability-tested; those are Phase 7 evaluation activities. HTTPS, backups and secret management belong to the deployment environment.
+- Not security-audited, load-tested or usability-tested; those are Phase 7 evaluation activities. HTTPS, scheduled off-host backups and secret management belong to the deployment environment. Docker Compose files are provided but unverified. What is implemented, partial or unverified is listed in [docs/status.md](docs/status.md).

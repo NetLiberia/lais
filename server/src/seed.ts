@@ -16,6 +16,16 @@ const COUNTIES = [
   { id: 2, code: 'MG', name: 'Margibi (synthetic pilot boundary)', bbox: [-10.6, 6.25, -10.3, 6.45] },
 ];
 
+/**
+ * The other 13 counties of Liberia, recorded without boundaries (status "unconfigured") and disabled until
+ * an administrator imports a boundary from an authoritative source. Codes are internal to LAIS, not official.
+ */
+const UNCONFIGURED_COUNTIES: [string, string][] = [
+  ['BM', 'Bomi'], ['BG', 'Bong'], ['GP', 'Gbarpolu'], ['GB', 'Grand Bassa'], ['CM', 'Grand Cape Mount'],
+  ['GG', 'Grand Gedeh'], ['GK', 'Grand Kru'], ['LO', 'Lofa'], ['MY', 'Maryland'], ['NI', 'Nimba'],
+  ['RC', 'River Cess'], ['RG', 'River Gee'], ['SI', 'Sinoe'],
+];
+
 const USERS: { username: string; displayName: string; role: string; county: number | null }[] = [
   { username: 'admin', displayName: 'System Administrator (synthetic)', role: 'system_admin', county: null },
   { username: 'gis.mo', displayName: 'GIS Officer, Montserrado (synthetic)', role: 'gis_officer', county: 1 },
@@ -79,8 +89,15 @@ export async function seed(password: string, log = console.log): Promise<void> {
 
     for (const c of COUNTIES) {
       await client.query(
-        `INSERT INTO lais.county (id, code, name, geom, is_synthetic) VALUES ($1, $2, $3, ST_GeomFromText($4, 4326), true)`,
+        `INSERT INTO lais.county (id, code, name, geom, is_synthetic, boundary_status, boundary_source, enabled)
+         VALUES ($1, $2, $3, ST_GeomFromText($4, 4326), true, 'synthetic', 'Synthetic prototype rectangle (not an official boundary)', true)`,
         [c.id, c.code, c.name, rect(c.bbox)],
+      );
+    }
+    for (const [i, [code, name]] of UNCONFIGURED_COUNTIES.entries()) {
+      await client.query(
+        "INSERT INTO lais.county (id, code, name, is_synthetic, boundary_status, enabled) VALUES ($1, $2, $3, false, 'unconfigured', false)",
+        [COUNTIES.length + i + 1, code, name],
       );
     }
 
@@ -88,8 +105,11 @@ export async function seed(password: string, log = console.log): Promise<void> {
     const userIds: Record<string, string> = {};
     for (const u of USERS) {
       const { rows: [row] } = await client.query(
-        `INSERT INTO lais.app_user (username, display_name, password_hash) VALUES ($1, $2, $3) RETURNING id`,
-        [u.username, u.displayName, hash],
+        `INSERT INTO lais.app_user (username, display_name, password_hash, email, staff_id, department)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [u.username, u.displayName, hash, `${u.username}@example.invalid`,
+          u.role === 'landowner' ? null : `SYN-${String(USERS.indexOf(u) + 1).padStart(3, '0')}`,
+          u.role === 'landowner' ? null : u.county === null ? 'National office (synthetic)' : 'County land office (synthetic)'],
       );
       userIds[u.username] = row.id;
     }
@@ -153,7 +173,7 @@ export async function seed(password: string, log = console.log): Promise<void> {
       `INSERT INTO audit.event (actor_username, action, outcome, detail) VALUES ('system', 'system.seed', 'success', $1)`,
       [JSON.stringify({ counties: COUNTIES.length, users: USERS.length, parties: PARTIES.length, parcels: PARCELS.length, synthetic: true })],
     );
-    log(`seeded ${COUNTIES.length} counties, ${USERS.length} users, ${PARTIES.length} parties, ${PARCELS.length} parcels (all synthetic)`);
+    log(`seeded ${COUNTIES.length + UNCONFIGURED_COUNTIES.length} counties (${COUNTIES.length} with synthetic boundaries), ${USERS.length} users, ${PARTIES.length} parties, ${PARCELS.length} parcels (all synthetic)`);
   });
 }
 

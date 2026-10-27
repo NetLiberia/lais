@@ -10,7 +10,9 @@
     "seed": "tsx src/seed.ts",
     "reset": "tsx src/reset.ts",
     "test": "vitest run",
-    "test:unit": "vitest run test/unit"
+    "test:unit": "vitest run test/unit",
+    "docs:permissions": "tsx scripts/gen-permission-doc.ts",
+    "backup:verify": "tsx scripts/restore-check.ts"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",

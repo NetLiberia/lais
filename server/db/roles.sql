@@ -23,3 +23,6 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA audit TO lais_app;
 GRANT EXECUTE ON FUNCTION audit.verify_chain() TO lais_app;
 
 REVOKE ALL ON public.schema_migrations FROM lais_app;
+-- Read-only, so administrator backups (pg_dump runs as the application login) can include the
+-- migration history that a restored database needs.
+GRANT SELECT ON public.schema_migrations TO lais_app;

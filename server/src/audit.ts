@@ -33,7 +33,8 @@ export async function writeAudit(req: Request | null, entry: AuditEntry, db: Db 
       entry.countyId ?? null,
       entry.caseId ?? null,
       req?.ip ?? null,
-      JSON.stringify(entry.detail ?? {}),
+      // The correlation id links the event to the request log line.
+      JSON.stringify(req?.requestId ? { ...entry.detail, requestId: req.requestId } : entry.detail ?? {}),
     ],
   );
 }

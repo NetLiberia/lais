@@ -38,6 +38,9 @@ class Client {
   post(url: string, body?: object) {
     return this.agent.post(url).set('X-CSRF-Token', this.csrf).send(body ?? {});
   }
+  put(url: string, body: object) {
+    return this.agent.put(url).set('X-CSRF-Token', this.csrf).send(body);
+  }
   patch(url: string, body: object) {
     return this.agent.patch(url).set('X-CSRF-Token', this.csrf).send(body);
   }
@@ -116,7 +119,7 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
     await resetDatabase(PASSWORD, () => undefined);
     app = (await import('../../src/app.js')).createApp();
     pool = (await import('../../src/db.js')).pool;
-    for (const u of ['admin', 'gis.mo', 'proc.mo', 'proc2.mo', 'reg.mo', 'reg.mg', 'supervisor', 'auditor', 'owner.demo']) {
+    for (const u of ['admin', 'gis.mo', 'gis.mg', 'proc.mo', 'proc2.mo', 'reg.mo', 'reg.mg', 'supervisor', 'auditor', 'owner.demo']) {
       users[u] = await new Client(u).login();
     }
   });
@@ -169,6 +172,12 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
       expect((await request(app).post('/api/auth/login').send({ username: 'guessed.account', password: 'wrong-again' })).status).toBe(429);
       // Same address, different account: unaffected.
       expect((await new Client('supervisor').agent.post('/api/auth/login').send({ username: 'supervisor', password: PASSWORD })).status).toBe(200);
+    });
+
+    it('does not count successful sign-ins towards the per-account limit', async () => {
+      for (let i = 0; i < 12; i++) {
+        expect((await request(app).post('/api/auth/login').send({ username: 'auditor', password: PASSWORD })).status).toBe(200);
+      }
     });
 
     it('gives the same answer for unknown users and wrong passwords', async () => {
@@ -822,29 +831,259 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
   });
 
   describe('administration', () => {
-    it('lets admins manage accounts but not themselves, and not combine admin with registrar', async () => {
-      const list = await as('admin').get('/api/admin/users');
-      const me = list.body.find((u: any) => u.username === 'admin');
-      expect((await as('admin').post(`/api/admin/users/${me.id}/roles`, { role: 'registrar', countyId: 1, reason: 'Self escalation attempt' })).status).toBe(403);
+    const tokenOf = (path: string) => new URL(path, 'http://x').searchParams.get('token')!;
+    const userId = async (username: string) => (await pool.query('SELECT id FROM lais.app_user WHERE username = $1', [username])).rows[0].id as string;
+    let newUserId = '';
+    let activationToken = '';
 
-      const created = await as('admin').post('/api/admin/users', { username: 'temp.user', displayName: 'Temp', temporaryPassword: 'temporary-password-1' });
-      expect(created.status).toBe(201);
-      expect((await as('admin').post(`/api/admin/users/${created.body.id}/roles`, { role: 'system_admin', reason: 'Needed for test' })).status).toBe(201);
-      expect((await as('admin').post(`/api/admin/users/${created.body.id}/roles`, { role: 'registrar', countyId: 1, reason: 'Combination test' })).status).toBe(409);
+    it('keeps account management away from users without the permission', async () => {
+      expect((await as('gis.mo').get('/api/admin/users')).status).toBe(403);
+      expect((await as('gis.mo').post('/api/admin/users', { username: 'x.user', displayName: 'X', roles: [{ role: 'processor', countyId: 1 }], reason: 'Not allowed' })).status).toBe(403);
+      // Supervisors may read accounts but not change them.
+      expect((await as('supervisor').get('/api/admin/users')).status).toBe(200);
+      expect((await as('supervisor').post('/api/admin/users', { username: 'x.user', displayName: 'X', roles: [{ role: 'processor', countyId: 1 }], reason: 'Not allowed' })).status).toBe(403);
+    });
+
+    it('does not let a GIS officer, or an administrator, raise their own privileges', async () => {
+      const gisId = await userId('gis.mo');
+      expect((await as('gis.mo').post(`/api/admin/users/${gisId}/roles`, { role: 'system_admin', reason: 'Self-elevation attempt' })).status).toBe(403);
+      const adminId = await userId('admin');
+      expect((await as('admin').post(`/api/admin/users/${adminId}/roles`, { role: 'registrar', countyId: 1, reason: 'Self escalation attempt' })).status).toBe(403);
+      expect((await as('admin').post(`/api/admin/users/${adminId}/status`, { status: 'suspended', reason: 'Self suspension attempt' })).status).toBe(403);
+    });
+
+    it('rejects surveyor accounts and invalid role or county assignments', async () => {
+      const base = { username: 'role.test', displayName: 'Role Test', reason: 'Testing assignment rules' };
+      expect((await as('admin').post('/api/admin/users', { ...base, roles: [{ role: 'surveyor', countyId: 1 }] })).status).toBe(400);
+      expect((await as('admin').post('/api/admin/users', { ...base, roles: [{ role: 'registrar' }] })).status).toBe(400);
+      expect((await as('admin').post('/api/admin/users', { ...base, roles: [{ role: 'registrar', countyId: 999 }] })).status).toBe(400);
+      expect((await as('admin').post('/api/admin/users', { ...base, roles: [{ role: 'system_admin', countyId: 1 }] })).status).toBe(400);
+      expect((await as('admin').post('/api/admin/users', { ...base, roles: [{ role: 'system_admin' }, { role: 'registrar', countyId: 1 }] })).status).toBe(400);
+      expect((await pool.query(`SELECT 1 FROM lais.app_user WHERE username = 'role.test'`)).rows).toHaveLength(0);
+    });
+
+    it('creates an invited account with a one-time activation link and audits it', async () => {
+      const res = await as('admin').post('/api/admin/users', {
+        username: 'new.gis', displayName: 'New GIS Officer (synthetic)', email: 'new.gis@example.invalid', staffId: 'SYN-900',
+        department: 'County land office (synthetic)', roles: [{ role: 'gis_officer', countyId: 1 }], reason: 'New hire for the pilot county',
+      });
+      expect(res.status).toBe(201);
+      newUserId = res.body.user.id;
+      activationToken = tokenOf(res.body.activation.path);
+      expect(activationToken.length).toBeGreaterThan(30);
+      const { rows: [u] } = await pool.query('SELECT status, password_hash FROM lais.app_user WHERE id = $1', [newUserId]);
+      expect(u).toEqual({ status: 'invited', password_hash: null });
+      // Only the token's hash is stored.
+      const { rows: tokens } = await pool.query('SELECT token_hash FROM lais.account_token WHERE user_id = $1', [newUserId]);
+      expect(tokens[0].token_hash.toString('utf8')).not.toContain(activationToken);
+      const { rows: events } = await pool.query(`SELECT detail FROM audit.event WHERE action = 'admin.user_create' AND entity_id = $1`, [newUserId]);
+      expect(events[0].detail.reason).toBe('New hire for the pilot county');
+    });
+
+    it('rejects duplicate usernames, email addresses and staff identifiers', async () => {
+      const roles = [{ role: 'processor', countyId: 1 }];
+      expect((await as('admin').post('/api/admin/users', { username: 'new.gis', displayName: 'Dup', roles, reason: 'Duplicate test' })).status).toBe(409);
+      expect((await as('admin').post('/api/admin/users', { username: 'other.one', displayName: 'Dup', email: 'NEW.GIS@example.invalid', roles, reason: 'Duplicate test' })).status).toBe(409);
+      expect((await as('admin').post('/api/admin/users', { username: 'other.two', displayName: 'Dup', staffId: 'syn-900', roles, reason: 'Duplicate test' })).status).toBe(409);
+    });
+
+    it('only lets an invited person in after they set their own password, once', async () => {
+      expect((await request(app).post('/api/auth/login').send({ username: 'new.gis', password: 'anything-at-all-1' })).status).toBe(401);
+      const inspect = await request(app).post('/api/auth/token/inspect').send({ token: activationToken });
+      expect(inspect.body).toMatchObject({ purpose: 'activation', username: 'new.gis' });
+      expect((await request(app).post('/api/auth/token/complete').send({ token: activationToken, newPassword: 'short' })).status).toBe(400);
+      expect((await request(app).post('/api/auth/token/complete').send({ token: activationToken, newPassword: 'new-gis-password-2026' })).status).toBe(200);
+      expect((await request(app).post('/api/auth/token/complete').send({ token: activationToken, newPassword: 'another-password-2026' })).status).toBe(400);
+
+      const agent = request.agent(app);
+      expect((await agent.post('/api/auth/login').send({ username: 'new.gis', password: 'new-gis-password-2026' })).status).toBe(200);
+      const session = (await agent.get('/api/auth/session')).body;
+      expect(session.capabilities).toContain('case.import_geometry');
+      expect(session.capabilities).not.toContain('user.manage');
+    });
+
+    it('resets a password by revoking sessions and issuing a link, never showing a password', async () => {
+      const agent = request.agent(app);
+      await agent.post('/api/auth/login').send({ username: 'new.gis', password: 'new-gis-password-2026' });
+      expect((await agent.get('/api/cases')).status).toBe(200);
+      const reset = await as('admin').post(`/api/admin/users/${newUserId}/password-reset`, { reason: 'User reported a lost password' });
+      expect(reset.status).toBe(200);
+      expect(JSON.stringify(reset.body)).not.toMatch(/password_hash|scrypt/);
+      expect((await agent.get('/api/cases')).status).toBe(401);
+      expect((await request(app).post('/api/auth/token/complete').send({ token: tokenOf(reset.body.path), newPassword: 'reset-gis-password-2026' })).status).toBe(200);
+      expect((await request(app).post('/api/auth/login').send({ username: 'new.gis', password: 'reset-gis-password-2026' })).status).toBe(200);
+    });
+
+    it('lists, filters, sorts and pages staff accounts without exposing secrets', async () => {
+      const page = await as('admin').get('/api/admin/users?role=processor&countyId=1&sort=username&dir=desc&pageSize=10');
+      expect(page.status).toBe(200);
+      expect(page.body.items.map((u: any) => u.username)).toEqual(['proc2.mo', 'proc.mo']);
+      expect(page.body.total).toBe(2);
+      expect(JSON.stringify(page.body)).not.toMatch(/password|mfa_secret|token_hash/);
+      const search = await as('admin').get('/api/admin/users?q=SYN-900');
+      expect(search.body.items.map((u: any) => u.username)).toEqual(['new.gis']);
+      expect((await as('admin').get('/api/admin/users?pageSize=7')).status).toBe(400);
+      const detail = await as('admin').get(`/api/admin/users/${newUserId}`);
+      expect(detail.body.activity.map((e: any) => e.action)).toEqual(expect.arrayContaining(['admin.user_create', 'auth.account_activated']));
+    });
+
+    it('notifies people of changes to their roles, and only them', async () => {
+      expect((await as('admin').post(`/api/admin/users/${newUserId}/roles`, { role: 'gis_officer', countyId: 2, reason: 'Covering Margibi as well' })).status).toBe(201);
+      const agent = request.agent(app);
+      await agent.post('/api/auth/login').send({ username: 'new.gis', password: 'reset-gis-password-2026' });
+      const mine = (await agent.get('/api/notifications')).body;
+      expect(mine.items.map((n: any) => n.title)).toContain('You were given the gis officer role');
+      expect(mine.unread).toBeGreaterThan(0);
+      const someone = await as('gis.mo').post(`/api/notifications/${mine.items[0].id}/read`);
+      expect(someone.status).toBe(404);
     });
 
     it('stops a suspended account immediately', async () => {
-      const list = await as('admin').get('/api/admin/users');
-      const target = list.body.find((u: any) => u.username === 'reg.mg');
-      expect((await as('admin').post(`/api/admin/users/${target.id}/status`, { status: 'suspended', reason: 'Suspension test' })).status).toBe(200);
+      const target = await userId('reg.mg');
+      expect((await as('admin').post(`/api/admin/users/${target}/status`, { status: 'suspended', reason: 'Suspension test' })).status).toBe(200);
       expect((await as('reg.mg').get('/api/cases')).status).toBe(401);
+      expect((await request(app).post('/api/auth/login').send({ username: 'reg.mg', password: PASSWORD })).status).toBe(401);
     });
 
-    it('shows administrators only technical audit events', async () => {
-      const res = await as('admin').get('/api/audit');
+    it('shows administrators security and system events but no land-record content', async () => {
+      const res = await as('admin').get('/api/audit?limit=500');
       expect(res.status).toBe(200);
       expect(res.body.scope).toBe('technical');
-      expect(res.body.events.every((e: any) => /^(auth|admin)\./.test(e.action))).toBe(true);
+      const actions = res.body.events.map((e: any) => e.action as string);
+      expect(actions.some((a: string) => /^(party|document|parcel|docrequest|finding)\./.test(a))).toBe(false);
+      for (const e of res.body.events.filter((x: any) => x.action.startsWith('case.'))) expect(e.detail).toEqual({});
+      const filtered = await as('admin').get('/api/audit?action=admin.&actor=admin');
+      expect(filtered.body.events.every((e: any) => e.action.startsWith('admin.') && e.actor_username === 'admin')).toBe(true);
+    });
+
+    it('serves the read-only permission matrix', async () => {
+      const res = await as('admin').get('/api/admin/permissions');
+      const decide = res.body.permissions.find((p: any) => p.action === 'case.decide');
+      expect(decide.roles).toEqual(['registrar']);
+      expect(res.body.roles.map((r: any) => r.role)).not.toContain('surveyor');
+    });
+  });
+
+  describe('administrator dashboard and operations', () => {
+    it('reports dashboard figures that match the database', async () => {
+      const res = await as('admin').get('/api/admin/dashboard/summary');
+      expect(res.status).toBe(200);
+      const { rows: [db] } = await pool.query(
+        `SELECT (SELECT count(*)::int FROM lais.land_case) AS cases, (SELECT count(*)::int FROM lais.parcel WHERE status <> 'retired') AS parcels,
+                (SELECT count(*)::int FROM lais.spatial_conflict WHERE review_status = 'open') AS conflicts`,
+      );
+      expect(res.body).toMatchObject({ applications_total: db.cases, parcels_published: db.parcels, conflicts_open: db.conflicts, counties_total: 15 });
+    });
+
+    it('builds charts from real data over the requested range', async () => {
+      const res = await as('supervisor').get('/api/admin/dashboard/charts?from=2026-01-01&to=2026-01-31');
+      expect(res.status).toBe(200);
+      expect(res.body.applicationsOverTime).toHaveLength(31);
+      expect(res.body.applicationsOverTime.every((d: any) => d.count === 0)).toBe(true); // no synthetic history is invented
+      expect(res.body.parcelsByCounty).toHaveLength(15);
+      expect((await as('admin').get('/api/admin/dashboard/charts?from=2026-02-01&to=2026-01-01')).status).toBe(400);
+    });
+
+    it('keeps operational views from staff without the permission', async () => {
+      for (const path of ['/api/admin/dashboard/summary', '/api/admin/health', '/api/admin/gis-jobs', '/api/admin/reports/staff.csv']) {
+        expect((await as('gis.mo').get(path)).status).toBe(403);
+      }
+      expect((await as('supervisor').get('/api/admin/settings')).status).toBe(403);
+    });
+
+    it('derives health from real checks', async () => {
+      const res = await as('admin').get('/api/admin/health');
+      const byKey = Object.fromEntries(res.body.checks.map((c: any) => [c.key, c]));
+      expect(byKey.database.status).toBe('healthy');
+      expect(byKey.postgis.summary).toMatch(/^PostGIS \d/);
+      expect(byKey.jobs.status).toBe('unknown');
+      expect(byKey.audit_chain.status).toBe('healthy');
+      expect(JSON.stringify(res.body)).not.toMatch(/postgres:\/\/|password/i);
+    });
+
+    it('monitors GIS import jobs with counts and spatial findings only', async () => {
+      const list = await as('admin').get('/api/admin/gis-jobs?pageSize=100');
+      expect(list.status).toBe(200);
+      expect(list.body.total).toBeGreaterThan(0);
+      const migrationJob = list.body.items.find((j: any) => j.case_type === 'migration' && j.received === 8);
+      expect(migrationJob).toMatchObject({ accepted: 3, rejected: 5, published_parcels: 3, status: 'published' });
+      const detail = await as('admin').get(`/api/admin/gis-jobs/${migrationJob.id}`);
+      expect(detail.body.features).toHaveLength(8);
+      expect(detail.body.findings.every((f: any) => !/PARTY|DOCUMENT|RIGHT|SHARE/.test(f.code))).toBe(true);
+    });
+
+    it('configures counties without inventing boundaries or legal authority', async () => {
+      const counties = (await as('admin').get('/api/admin/counties')).body;
+      expect(counties).toHaveLength(15);
+      const bong = counties.find((c: any) => c.name === 'Bong');
+      expect(bong).toMatchObject({ boundary_status: 'unconfigured', enabled: false, area_km2: null });
+      expect((await as('admin').patch(`/api/admin/counties/${bong.id}`, { enabled: true, reason: 'Trying to enable' })).status).toBe(409);
+      expect((await as('admin').post(`/api/admin/counties/1/verify-boundary`, { source: 'Made up', reason: 'Trying to verify synthetic' })).status).toBe(409);
+      expect((await as('gis.mo').patch(`/api/admin/counties/1`, { name: 'Renamed', reason: 'Not allowed' })).status).toBe(403);
+      // A disabled county accepts no new cases.
+      expect((await as('admin').patch('/api/admin/counties/2', { enabled: false, reason: 'Pausing Margibi for the test' })).status).toBe(200);
+      const created = await as('gis.mg').post('/api/cases', { caseType: 'first_registration', countyId: 2 });
+      expect(created.status).toBe(409);
+      expect((await as('admin').patch('/api/admin/counties/2', { enabled: true, reason: 'Resuming Margibi' })).status).toBe(200);
+    });
+
+    it('imports a county boundary as provisional and refuses invalid ones', async () => {
+      const bong = (await as('admin').get('/api/admin/counties')).body.find((c: any) => c.name === 'Bong');
+      const upload = (file: Buffer, crs = '4326') => as('admin').upload(`/api/admin/counties/${bong.id}/boundary`, file, 'boundary.geojson', { crs, source: 'Synthetic test polygon', reason: 'Boundary import test' });
+      expect((await upload(fixture('self_intersecting_4326.geojson'))).status).toBe(400);
+      expect((await upload(fixture('valid_parcel_utm29n.geojson'), '4326')).status).toBe(400);
+      const ok = await upload(fixture('valid_parcel_4326.geojson'));
+      expect(ok.status).toBe(200);
+      expect(ok.body.boundaryStatus).toBe('provisional');
+      const { rows: [c] } = await pool.query('SELECT boundary_status, enabled FROM lais.county WHERE id = $1', [bong.id]);
+      expect(c).toEqual({ boundary_status: 'provisional', enabled: false });
+    });
+
+    it('changes only allow-listed settings, with an audit record', async () => {
+      expect((await as('admin').put('/api/admin/settings/portal.banner_message', { value: 'Maintenance on Saturday', reason: 'Planned maintenance' })).status).toBe(200);
+      expect((await as('admin').put('/api/admin/settings/portal.banner_message', { value: 42, reason: 'Wrong type' })).status).toBe(400);
+      expect((await as('admin').put('/api/admin/settings/security.disable_audit', { value: true, reason: 'Must not exist' })).status).toBe(404);
+      expect((await as('gis.mo').get('/api/auth/session')).body.banner).toBe('Maintenance on Saturday');
+      const { rows } = await pool.query(`SELECT detail FROM audit.event WHERE action = 'settings.update' ORDER BY chain_seq DESC LIMIT 1`);
+      expect(rows[0].detail).toMatchObject({ to: 'Maintenance on Saturday', reason: 'Planned maintenance' });
+      await as('admin').put('/api/admin/settings/portal.banner_message', { value: '', reason: 'Maintenance over' });
+    });
+
+    it('manages document categories without breaking workflow rules', async () => {
+      expect((await as('admin').post('/api/admin/document-categories', { code: 'lease_agreement', label: 'Lease agreement', reason: 'New category' })).status).toBe(201);
+      expect((await as('admin').patch('/api/admin/document-categories/deed', { active: false, reason: 'Trying to disable' })).status).toBe(409);
+      expect((await as('admin').patch('/api/admin/document-categories/lease_agreement', { active: false, reason: 'Not needed after all' })).status).toBe(200);
+      const created = await as('proc.mo').post('/api/cases', { caseType: 'transfer', parcelUpi: 'PROV-MO-000004' });
+      const upload = await as('proc.mo').upload(`/api/cases/${created.body.id}/documents`, fixture('synthetic_document.pdf'), 'lease.pdf', { docType: 'lease_agreement', classification: 'restricted' });
+      expect(upload.status).toBe(400);
+    });
+
+    it('searches only what the caller may discover', async () => {
+      const gis = (await as('gis.mo').get('/api/search?q=PROV-MO')).body.results;
+      expect(gis.some((r: any) => r.type === 'parcel')).toBe(true);
+      expect(gis.some((r: any) => r.type === 'user')).toBe(false);
+      const admin = (await as('admin').get('/api/search?q=proc')).body.results;
+      expect(admin.some((r: any) => r.type === 'user')).toBe(true);
+      expect(admin.some((r: any) => r.type === 'case')).toBe(false);
+      expect((await as('owner.demo').get('/api/search?q=PROV')).status).toBe(403);
+      expect(JSON.stringify((await as('admin').get('/api/search?q=Testperson')).body.results)).not.toMatch(/Testperson/);
+    });
+
+    it('records every backup attempt honestly', async () => {
+      const res = await as('admin').post('/api/admin/backups', { reason: 'Integration test backup' });
+      expect([201, 502]).toContain(res.status);
+      const { rows: [run] } = await pool.query('SELECT status, error FROM lais.backup_run ORDER BY started_at DESC LIMIT 1');
+      expect(run.status).toBe(res.status === 201 ? 'succeeded' : 'failed');
+      expect((await as('supervisor').post('/api/admin/backups', { reason: 'Not allowed' })).status).toBe(403);
+    });
+
+    it('exports privacy-safe reports', async () => {
+      const staff = await as('admin').get('/api/admin/reports/staff.csv');
+      expect(staff.status).toBe(200);
+      expect(staff.text).toContain('proc.mo');
+      expect(staff.text).not.toMatch(/owner\.demo|@example|scrypt/);
+      const apps = await as('supervisor').get('/api/admin/reports/applications.csv');
+      expect(apps.text.split('\r\n')[0]).toBe('"case_no","case_type","status","county","created_at","updated_at"');
     });
   });
 
@@ -1000,6 +1239,26 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
       expect(after - before).toBeGreaterThanOrEqual(40);
       const verify = await as('auditor').get('/api/audit/verify');
       expect(verify.body).toMatchObject({ intact: true });
+    });
+  });
+  describe('API description', () => {
+    it('serves an OpenAPI document generated from the mounted routers, with a summary for every route', async () => {
+      const { API_MOUNTS } = await import('../../src/app.js');
+      const { listRoutes, SUMMARIES } = await import('../../src/openapi.js');
+      const routes = listRoutes(API_MOUNTS).map((r) => r.key);
+      expect(routes.length).toBeGreaterThan(80);
+      expect(routes.filter((k) => !SUMMARIES[k]), 'routes without a summary').toEqual([]);
+      expect(Object.keys(SUMMARIES).filter((k) => !routes.includes(k)), 'summaries for routes that do not exist').toEqual([]);
+
+      const res = await request(app).get('/api/openapi.json');
+      expect(res.status).toBe(200);
+      expect(res.body.openapi).toBe('3.1.0');
+      expect(res.body.paths['/admin/users'].post.security).toEqual([{ session: [], csrf: [] }]);
+      expect(res.body.paths['/admin/users'].get.security).toEqual([{ session: [] }]);
+      expect(res.body.paths['/public/parcels'].get.security).toEqual([]);
+      expect(res.body.paths['/auth/login'].post.security).toEqual([]);
+      // Lists endpoints only: no data and no secrets.
+      expect(JSON.stringify(res.body)).not.toMatch(/password_hash|PROV-MO|example\.invalid/);
     });
   });
 });

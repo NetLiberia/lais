@@ -17,7 +17,9 @@ import { computeSnapshot } from '../services/snapshot.js';
 import { evaluateCase, latestRun, persistRun, PROVISIONAL_UPI_PATTERN } from '../services/validation.js';
 import { publishApprovedCase } from '../services/publication.js';
 import { OWNERSHIP_TYPES } from '../services/shares.js';
+import { notifyUsers } from '../services/notify.js';
 import { detectDocumentType } from '../services/files.js';
+import { csvCell } from '../csv.js';
 
 export const casesRouter = Router();
 
@@ -26,7 +28,6 @@ const documentUpload = multer({ storage: multer.memoryStorage(), limits: { fileS
 
 const LAND_CATEGORIES = ['public', 'government', 'customary', 'private'] as const;
 const RRR_TYPES = ['ownership', 'co_ownership', 'customary_tenure', 'lease', 'mortgage', 'easement'] as const;
-const DOC_TYPES = ['deed', 'survey_plan', 'customary_certificate', 'id_document', 'power_of_attorney', 'other'] as const;
 const CLASSIFICATIONS = ['public', 'restricted', 'highly_sensitive'] as const;
 
 /** Case-level actions whose availability is reported to the UI. The server re-checks each one when called. */
@@ -169,6 +170,8 @@ casesRouter.post('/', async (req, res) => {
       }
     }
     enforce(req, 'case.create', { countyId }, { entityType: 'case' });
+    const { rows: [county] } = await client.query('SELECT name, enabled FROM lais.county WHERE id = $1', [countyId]);
+    if (!county.enabled) throw conflict(`${county.name} is not enabled for operations yet; an administrator must configure its boundary and enable it`);
 
     const { rows: [cs] } = await client.query(
       `INSERT INTO lais.land_case (case_type, county_id, parcel_id, land_category, land_use, source_reference, proposed_upi, created_by,
@@ -462,12 +465,6 @@ casesRouter.post('/:id/features/:index/exclusion', async (req, res) => {
   res.json({ ok: true });
 });
 
-const csvCell = (v: unknown) => {
-  const t = v === null || v === undefined ? '' : String(v);
-  // Quote every cell and neutralise spreadsheet formulas in data that came from a legacy file.
-  return `"${(/^[=+\-@]/.test(t) ? `'${t}` : t).replace(/"/g, '""')}"`;
-};
-
 /**
  * Reconciliation report for a migration batch: one row per imported feature with its outcome,
  * so feature counts can be checked before and after processing.
@@ -586,7 +583,8 @@ casesRouter.delete('/:id/rights/:rightId', async (req, res) => {
 });
 
 const documentFields = z.object({
-  docType: z.enum(DOC_TYPES),
+  // Checked against the active document categories below.
+  docType: z.string().regex(/^[a-z][a-z0-9_]{2,40}$/),
   classification: z.enum(CLASSIFICATIONS),
   referenceNo: z.string().max(100).optional(),
   issuer: z.string().max(200).optional(),
@@ -596,6 +594,8 @@ const documentFields = z.object({
 casesRouter.post('/:id/documents', documentUpload.single('file'), async (req, res) => {
   if (!req.file) throw badRequest('Attach a file');
   const fields = documentFields.parse(req.body ?? {});
+  const { rows: [category] } = await pool.query('SELECT active FROM lais.document_category WHERE code = $1', [fields.docType]);
+  if (!category?.active) throw badRequest('Unknown or inactive document category');
   const mime = detectDocumentType(req.file.buffer);
   if (!mime) throw badRequest('Only PDF, PNG and JPEG files are accepted');
   if (fields.docType === 'id_document' && fields.classification !== 'highly_sensitive') {
@@ -676,6 +676,9 @@ casesRouter.post('/:id/submit', async (req, res) => {
     const next = errors.length > 0
       ? await setStatus(client, validating, 'returned', null, 'validation_failed', `${errors.length} blocking error(s)`)
       : await setStatus(client, validating, 'under_review', null, 'validation_passed');
+    if (next.status === 'returned' && cs.created_by !== actor) {
+      await notifyUsers(client, [cs.created_by], { category: 'workflow', title: `${cs.case_no} was returned by validation`, body: `${errors.length} blocking error(s) to correct`, link: `/work/cases/${cs.id}` });
+    }
     await writeAudit(req, {
       action: 'case.submit', outcome: 'success', entityType: 'case', entityId: cs.id, caseId: cs.id, countyId: cs.county_id,
       detail: { runId, result: next.status, errors: errors.length, warnings: evaluation.findings.length - errors.length },
@@ -746,6 +749,7 @@ casesRouter.post('/:id/decision', async (req, res) => {
       [cs.id, req.auth!.user.id, body.decision, body.reason, body.authorityBasis ?? null, latest.run.id, snapshot],
     );
     const next = await setStatus(client, cs, body.decision, req.auth!.user.id, 'decide', body.reason);
+    await notifyUsers(client, [cs.created_by], { category: 'workflow', title: `${cs.case_no} was ${body.decision} by the registrar`, link: `/work/cases/${cs.id}` });
     await writeAudit(req, {
       action: `case.${body.decision === 'approved' ? 'approve' : body.decision === 'rejected' ? 'reject' : 'return'}`,
       outcome: 'success', entityType: 'case', entityId: cs.id, caseId: cs.id, countyId: cs.county_id,

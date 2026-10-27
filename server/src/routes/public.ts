@@ -37,7 +37,8 @@ const STATUS_LABEL = `CASE
 
 publicRouter.get('/counties', async (_req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, code, name, is_synthetic, ST_AsGeoJSON(geom, 6)::json AS geometry FROM lais.county ORDER BY id`,
+    // Only counties with a configured boundary can be drawn; unconfigured ones have no geometry.
+    `SELECT id, code, name, is_synthetic, boundary_status, ST_AsGeoJSON(geom, 6)::json AS geometry FROM lais.county WHERE geom IS NOT NULL ORDER BY id`,
   );
   res.json({
     type: 'FeatureCollection',

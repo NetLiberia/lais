@@ -73,10 +73,20 @@ const RULES = {
   'party.link_user': { roles: ['processor'], scope: 'global' },
   'party.view_sensitive': { roles: ['processor', 'registrar'], scope: 'global' },
 
-  // Oversight and administration
+  // Oversight and administration. Administrators run the platform; none of these confer legal authority.
   'audit.view_all': { roles: ['supervisor', 'auditor'], scope: 'global' },
   'audit.view_technical': { roles: ['system_admin'], scope: 'global' },
   'user.manage': { roles: ['system_admin'], scope: 'global' },
+  'users.read': { roles: ['system_admin', 'supervisor'], scope: 'global' },
+  'roles.assign': { roles: ['system_admin'], scope: 'global' },
+  'counties.read': { roles: ['system_admin', 'supervisor', 'auditor', 'gis_officer', 'processor', 'registrar'], scope: 'global' },
+  'counties.manage': { roles: ['system_admin'], scope: 'global' },
+  'dashboard.view': { roles: ['system_admin', 'supervisor'], scope: 'global' },
+  'gis.sync.read': { roles: ['system_admin', 'supervisor'], scope: 'global' },
+  'system.health': { roles: ['system_admin', 'supervisor'], scope: 'global' },
+  'system.configure': { roles: ['system_admin'], scope: 'global' },
+  'backups.run': { roles: ['system_admin'], scope: 'global' },
+  'reports.export': { roles: ['system_admin', 'supervisor'], scope: 'global' },
 
   // Document requests from landowners (status rules are enforced by the route and a database trigger)
   'docrequest.view': { roles: ['processor', 'registrar', 'supervisor', 'auditor'], scope: 'county' },
@@ -90,6 +100,74 @@ const RULES = {
 
 export type Action = keyof typeof RULES;
 export const ACTIONS = Object.keys(RULES) as Action[];
+
+/** Plain-language meaning of each permission, for the permission matrix shown to administrators. */
+export const ACTION_DESCRIPTIONS: Record<Action, string> = {
+  'case.create': 'Open a case in an assigned county',
+  'case.view': 'View cases in an assigned county',
+  'case.edit_attributes': 'Edit case details while the case is a draft or returned',
+  'case.import_geometry': 'Import parcel geometry into staging',
+  'case.edit_rights': 'Record proposed rights and holders',
+  'case.upload_document': 'Attach documents and evidence to a case',
+  'case.verify_document': 'Verify a document uploaded by someone else',
+  'case.validate': 'Run validation and conflict checks',
+  'case.submit': 'Submit a case for review',
+  'case.withdraw': 'Withdraw a case they opened',
+  'case.acknowledge_finding': 'Acknowledge a validation warning with an investigation note',
+  'case.decide': 'Approve, return or reject a case (legal decision)',
+  'case.publish': 'Publish an approved case to the register',
+  'parcel.view_internal': 'View internal parcel records (rights, history, cases)',
+  'parcel.manage_dispute': 'Record and close parcel disputes',
+  'document.view_restricted': 'Download restricted documents',
+  'document.view_highly_sensitive': 'Download highly sensitive documents',
+  'party.search': 'Search party records',
+  'party.create': 'Record a new party',
+  'party.verify_identity': 'Verify the identity of a party recorded by someone else',
+  'party.link_user': 'Link a landowner portal account to a verified party',
+  'party.view_sensitive': 'Reveal identity numbers and contact details (logged)',
+  'audit.view_all': 'View the full audit trail',
+  'audit.view_technical': 'View security and system audit events',
+  'user.manage': 'Create staff accounts, change their status, reset passwords',
+  'users.read': 'View staff accounts',
+  'roles.assign': 'Assign and revoke roles and county assignments for other staff',
+  'counties.read': 'View county configuration',
+  'counties.manage': 'Configure counties and import administrative boundaries',
+  'dashboard.view': 'View system-wide operational statistics',
+  'gis.sync.read': 'Monitor GIS import jobs and their validation outcomes',
+  'system.health': 'View system health checks',
+  'system.configure': 'Change non-legal system settings and document categories',
+  'backups.run': 'Start a database backup',
+  'reports.export': 'Export administrative reports (no personal data)',
+  'docrequest.view': 'View landowner document requests',
+  'docrequest.prepare': 'Prepare documents for release to a landowner',
+  'docrequest.decide': 'Approve or refuse a document release',
+  'landowner.view_own': 'View own registered interests',
+  'landowner.request_documents': 'Request copies of documents for own parcels',
+};
+
+/** The permission matrix: every action with the roles allowed it and its constraints. */
+export function permissionMatrix() {
+  return ACTIONS.map((action) => {
+    const rule: Rule = RULES[action];
+    return {
+      action,
+      description: ACTION_DESCRIPTIONS[action],
+      roles: [...rule.roles],
+      scope: rule.scope,
+      statuses: rule.statuses ? [...rule.statuses] : null,
+      caseTypes: rule.caseTypes ? [...rule.caseTypes] : null,
+      separation: rule.separation ?? null,
+    };
+  });
+}
+
+/** Actions the principal can perform somewhere (any county or globally): used to shape the UI only. */
+export function capabilities(principal: Principal): Action[] {
+  return ACTIONS.filter((a) => {
+    const rule: Rule = RULES[a];
+    return principal.grants.some((g) => rule.roles.includes(g.role));
+  });
+}
 
 export interface ResourceContext {
   countyId?: number | null;

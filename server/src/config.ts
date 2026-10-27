@@ -34,6 +34,11 @@ export const config = {
   overlapToleranceM2: number('OVERLAP_TOLERANCE_M2', 1),
   duplicateHausdorffM: number('DUPLICATE_HAUSDORFF_M', 2),
   minParcelAreaM2: number('MIN_PARCEL_AREA_M2', 10),
+  /** pg_dump used for administrator-initiated backups; empty means look it up on PATH. */
+  pgDumpPath: process.env.PG_DUMP_PATH || 'pg_dump',
+  backupDir: path.resolve(process.env.BACKUP_DIR || 'storage/backups'),
+  /** Number of reverse proxies in front of the API, so client addresses are taken from X-Forwarded-For. 0 = none. */
+  trustProxyHops: number('TRUST_PROXY', 0),
   /** How long a landowner can download documents released to them. */
   documentReleaseDays: number('DOCUMENT_RELEASE_DAYS', 30),
   /** A corrected boundary moving further than this from the published one is flagged for review. */

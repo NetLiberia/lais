@@ -54,6 +54,25 @@ export interface Session {
   csrfToken?: string;
   user?: { id: string; username: string; displayName: string; mfaEnrolled: boolean };
   grants?: Grant[];
+  /** Actions the account may perform somewhere. Shapes the interface only; the server checks every request. */
+  capabilities?: string[];
+  banner?: string | null;
+}
+
+/** Saves a CSV or other file returned by an authenticated GET. */
+export async function downloadFile(path: string, fallbackName: string) {
+  const res = await fetch(`/api${path}`, { credentials: 'same-origin' });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new ApiError(res.status, typeof data?.error === 'string' ? data.error : `Download failed (${res.status})`);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export const ROLE_LABELS: Record<string, string> = {

@@ -5,3 +5,4 @@ dist/
 server/storage/
 *.log
 .vscode/
+e2e/shots/
