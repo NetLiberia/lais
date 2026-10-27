@@ -33,7 +33,7 @@ Phase 3 prototype for the MSc project *Development and Evaluation of a Privacy-A
 | User management without the administrator ever handling passwords: invited accounts, one-time activation and reset links, roles with county scope, suspension with reasons, last-administrator and self-change protection, and an audited staff export | `pages/admin/UsersPage.tsx`, `routes/admin.ts`, `009_admin_foundation.sql` |
 | County management for all 15 counties: no invented boundaries, provisional imports, verification with provenance, and enablement gating new cases | `pages/admin/CountiesPage.tsx` |
 | GIS synchronization monitoring, settings, document categories, backups with a restore check, CSV reports, in-app notifications, global search, and an audit view limited to technical events | `pages/admin/`, `routes/adminOps.ts` |
-| OpenAPI 3.1 description generated from the routers (`/api/openapi.json`), structured JSON logs and request correlation IDs | `openapi.ts`, `logger.ts` |
+| OpenAPI 3.1 description generated from the routers (`/api/openapi.json`), with request bodies and query parameters taken from the handlers' own Zod schemas; structured JSON logs and request correlation IDs | `openapi.ts`, `logger.ts` |
 | Landowner document requests: a landowner asks for copies on a parcel where they hold a registered interest; a processor chooses verified documents from published cases; a different registrar approves or refuses with a reason; copies can be downloaded for `DOCUMENT_RELEASE_DAYS`. Eligibility is re-checked at every download, highly sensitive documents are never released (enforced in the database too), and every download is audited | `routes/me.ts`, `routes/documentRequests.ts`, `005_document_requests.sql` |
 
 ## Architecture
@@ -121,11 +121,12 @@ npm test
 
 Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 137 tests in about 26 seconds with the default 10-connection pool.
 
-`npm test` also runs **18 web component tests** (Vitest, Testing Library, jsdom). They cover:
+`npm test` also runs **19 web component tests** (Vitest, Testing Library, jsdom). They cover:
 - the shared dialogs: a reason is required, server refusals are shown, and focus stays where the user is typing;
 - tables and paging;
 - the navigation each role sees;
-- the create-account form: county rules, no surveyor role, no password field, and a one-time link.
+- the create-account form: county rules, no surveyor role, no password field, and a one-time link;
+- URL filters: a filter chosen straight after clearing the search is kept.
 
 `npm run lint` runs ESLint over the API, the web app and the walkthroughs. API responses are typed in `web/src/types.ts`, and `any` is a lint error outside test files.
 

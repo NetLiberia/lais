@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { pool } from '../db.js';
 import { badRequest, notFound } from '../http.js';
+import { documentQuery } from '../openapi.js';
 
 /**
  * Public information portal. Deliberately separate from the internal API: these queries
@@ -106,3 +107,6 @@ publicRouter.get('/parcels/:upi', async (req, res) => {
   const { geometry, ...properties } = row;
   res.json({ type: 'Feature', geometry, properties });
 });
+
+// API description (/api/openapi.json): the schemas above, as validated by the handlers.
+documentQuery('GET /public/parcels', bboxQuery);

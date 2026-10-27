@@ -8,7 +8,7 @@ import { Copy, Download, KeyRound, Plus, UserPlus } from 'lucide-react';
 import { api, downloadFile, ROLE_LABELS } from '../../api';
 import { useAuth } from '../../auth';
 import {
-  Badge, DataTable, Drawer, EmptyState, ErrorBanner, fmtDateTime, Modal, Pagination, Panel, QueryState, ReasonDialog, useToast, type Column,
+  Badge, DataTable, Drawer, EmptyState, ErrorBanner, fmtDateTime, Modal, Pagination, Panel, QueryState, ReasonDialog, usePatchParams, useToast, type Column,
 } from '../../components/kit';
 
 interface RoleGrant { id: string; role: string; countyId: number | null; countyCode: string | null; countyName: string | null }
@@ -291,7 +291,7 @@ function UserDrawer({ id, onClose, counties, onLink }: { id: string; onClose: ()
 export function UsersPage() {
   const { can } = useAuth();
   const toast = useToast();
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const [creating, setCreating] = useState(false);
   const [link, setLink] = useState<{ path: string; expiresAt: string; purpose: string } | null>(null);
   const [q, setQ] = useState(params.get('q') ?? '');
@@ -301,13 +301,13 @@ export function UsersPage() {
     sort: params.get('sort') ?? 'name', dir: (params.get('dir') ?? 'asc') as 'asc' | 'desc',
     page: Number(params.get('page') ?? 1), pageSize: Number(params.get('pageSize') ?? 25),
   };
-  const set = (patch: Record<string, string | number>, resetPage = true) => {
-    const next = new URLSearchParams(params);
-    for (const [k, v] of Object.entries(patch)) { if (v === '' || v === undefined) next.delete(k); else next.set(k, String(v)); }
-    if (resetPage && !('page' in patch)) next.delete('page');
-    setParams(next, { replace: true });
-  };
-  useEffect(() => { const t = setTimeout(() => { if (q !== filters.q) set({ q }); }, 300); return () => clearTimeout(t); }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
+  const patchParams = usePatchParams();
+  const set = (patch: Record<string, string | number>, resetPage = true) => patchParams(patch, { resetPage });
+  // Debounced search. Patching the newest URL means a filter chosen meanwhile is never lost.
+  useEffect(() => {
+    const t = setTimeout(() => { if (q !== filters.q) patchParams({ q }, { resetPage: true }); }, 300);
+    return () => clearTimeout(t);
+  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v !== '' && v !== undefined).map(([k, v]) => [k, String(v)])).toString();
   const users = useQuery({ queryKey: ['admin', 'users', query], queryFn: () => api<{ items: UserRow[]; total: number }>(`/admin/users?${query}`), placeholderData: keepPreviousData });
@@ -344,7 +344,7 @@ export function UsersPage() {
           <label>Status<select value={filters.status} onChange={(e) => set({ status: e.target.value })}><option value="">All</option>{['invited', 'active', 'suspended', 'deactivated'].map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
           <label>Created from<input type="date" value={filters.createdFrom} onChange={(e) => set({ createdFrom: e.target.value })} /></label>
           <label>to<input type="date" value={filters.createdTo} onChange={(e) => set({ createdTo: e.target.value })} /></label>
-          {anyFilter && <button className="link" onClick={() => { setQ(''); setParams(new URLSearchParams(), { replace: true }); }}>Clear filters</button>}
+          {anyFilter && <button className="link" onClick={() => { setQ(''); patchParams((cur) => Object.fromEntries([...cur.keys()].map((k) => [k, '']))); }}>Clear filters</button>}
         </div>
         <QueryState query={users} isEmpty={(d) => d.items.length === 0} empty={<EmptyState title="No accounts match these filters">{anyFilter && 'Try clearing the filters.'}</EmptyState>}>
           {(d) => (
@@ -352,7 +352,10 @@ export function UsersPage() {
               <DataTable
                 caption="Staff accounts" columns={columns} rows={d.items} rowKey={(u) => u.id}
                 sort={{ key: filters.sort, dir: filters.dir }}
-                onSort={(key) => set({ sort: key, dir: filters.sort === key && filters.dir === 'asc' ? 'desc' : 'asc' })}
+                onSort={(key) => patchParams((cur) => {
+                  const same = (cur.get('sort') ?? 'name') === key && (cur.get('dir') ?? 'asc') === 'asc';
+                  return { sort: key, dir: same ? 'desc' : 'asc' };
+                }, { resetPage: true })}
                 onRowClick={(u) => set({ user: u.id }, false)}
               />
               <Pagination page={filters.page} pageSize={filters.pageSize} total={d.total} onPage={(p) => set({ page: p }, false)} onPageSize={(s) => set({ pageSize: s })} />

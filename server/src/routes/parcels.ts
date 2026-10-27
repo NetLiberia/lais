@@ -5,6 +5,7 @@ import { conflict, notFound, parseId } from '../http.js';
 import { writeAudit } from '../audit.js';
 import { enforce } from '../authz/enforce.js';
 import { authorize } from '../authz/policy.js';
+import { documentBody } from '../openapi.js';
 
 export const parcelsRouter = Router();
 
@@ -121,3 +122,7 @@ parcelsRouter.post('/:upi/disputes/:disputeId/close', async (req, res) => {
   });
   res.json({ ok: true });
 });
+
+// API description (/api/openapi.json): the schemas above, as validated by the handlers.
+documentBody('POST /parcels/{upi}/disputes', openDisputeBody);
+documentBody('POST /parcels/{upi}/disputes/{disputeId}/close', closeDisputeBody);

@@ -2,7 +2,7 @@ import { useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Info } from 'lucide-react';
 import { api, CASE_TYPE_LABELS } from '../../api';
-import { Badge, DataTable, Drawer, EmptyState, fmtDateTime, Pagination, Panel, QueryState, type Column } from '../../components/kit';
+import { Badge, DataTable, Drawer, EmptyState, fmtDateTime, Pagination, Panel, QueryState, usePatchParams, type Column } from '../../components/kit';
 
 interface Job {
   id: string; source_filename: string; declared_srid: number; received: number; accepted: number; rejected: number; published_parcels: number;
@@ -76,15 +76,12 @@ function JobDrawer({ id, onClose }: { id: string; onClose: () => void }) {
 }
 
 export function GisSyncPage() {
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const status = params.get('status') ?? '';
   const page = Number(params.get('page') ?? 1);
   const pageSize = Number(params.get('pageSize') ?? 25);
-  const set = (patch: Record<string, string>) => {
-    const next = new URLSearchParams(params);
-    for (const [k, v] of Object.entries(patch)) { if (v) next.set(k, v); else next.delete(k); }
-    setParams(next, { replace: true });
-  };
+  const patchParams = usePatchParams();
+  const set = (patch: Record<string, string>) => patchParams(patch);
   const jobs = useQuery({
     queryKey: ['admin', 'gis-jobs', status, page, pageSize],
     queryFn: () => api<{ items: Job[]; total: number }>(`/admin/gis-jobs?page=${page}&pageSize=${pageSize}${status ? `&status=${status}` : ''}`),

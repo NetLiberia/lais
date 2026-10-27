@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { pool } from '../db.js';
 import { enforce } from '../authz/enforce.js';
 import { authorize, scopeFor } from '../authz/policy.js';
+import { documentQuery } from '../openapi.js';
 
 /**
  * Global search across records the caller is allowed to discover: parcels (public fields only), cases in
@@ -13,10 +14,12 @@ export const searchRouter = Router();
 
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
+const searchQuery = documentQuery('GET /search', z.object({ q: z.string().trim().min(2).max(60) }));
+
 searchRouter.get('/', async (req, res) => {
   // Staff only: landowner portal accounts have no search.
   enforce(req, 'counties.read', {}, { entityType: 'search' });
-  const q = z.string().trim().min(2).max(60).parse(req.query.q);
+  const { q } = searchQuery.parse(req.query);
   const like = `%${escapeLike(q)}%`;
   const principal = req.auth!.principal;
   const results: { type: string; id: string; title: string; subtitle: string; link: string }[] = [];

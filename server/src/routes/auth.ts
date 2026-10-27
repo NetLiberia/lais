@@ -21,6 +21,7 @@ import {
   rotateSession,
   type SessionState,
 } from '../auth/session.js';
+import { documentBody } from '../openapi.js';
 
 export const authRouter = Router();
 
@@ -265,3 +266,10 @@ authRouter.post('/password', requireActiveSession, async (req, res) => {
   await writeAudit(req, { action: 'auth.password_change', outcome: 'success', entityType: 'user', entityId: req.auth!.user.id });
   res.json({ ok: true });
 });
+
+// API description (/api/openapi.json): the schemas above, as validated by the handlers.
+documentBody('POST /auth/login', loginBody);
+documentBody('POST /auth/token/inspect', tokenBody);
+documentBody('POST /auth/token/complete', activateBody);
+documentBody(['POST /auth/mfa/verify', 'POST /auth/mfa/enroll/confirm'], codeBody);
+documentBody('POST /auth/password', passwordBody);

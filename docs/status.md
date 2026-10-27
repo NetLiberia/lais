@@ -8,7 +8,7 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 |---|---|
 | `npm test`: unit tests (policy, workflow, helpers, CSV safety, permission document) | 44 passed |
 | `npm test`: integration tests against a real PostgreSQL + PostGIS database | 93 passed |
-| `npm test`: web component tests (shared dialogs and tables, permission-aware navigation, account creation) in jsdom | 18 passed |
+| `npm test`: web component tests (shared dialogs and tables, permission-aware navigation, account creation, URL filters) in jsdom | 19 passed |
 | `npm run lint` (ESLint with typescript-eslint and the React hooks rules) | 0 errors, 0 warnings. `any` is an error outside test files |
 | `npm run e2e`: browser walkthroughs in Microsoft Edge (7 scripts) | 81 steps passed, 0 problems |
 | `npm run backup:verify` on a backup taken through the interface | Restored and verified (see [backup-restore.md](backup-restore.md)) |
@@ -59,7 +59,9 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 **Platform**
 - In-app notifications: account events, validation returns, decisions and account lockouts.
 - Structured JSON request logs, and a correlation ID (`X-Request-Id`) in every audit event and in 500 responses.
-- OpenAPI 3.1 at `GET /api/openapi.json`, generated from the mounted routers. A test checks that every route has a summary.
+- OpenAPI 3.1 at `GET /api/openapi.json`, generated from the mounted routers:
+  - request bodies, upload fields and query parameters come from the same Zod schemas the handlers validate with (38 operations with a body, 13 with query parameters);
+  - a test checks that every route has a summary, that every write route has a documented body or is marked as taking none, and that the document passes an OpenAPI 3.1 schema validator.
 - Sign-in rate limit per account (failed attempts only) plus a per-address ceiling.
 - All the earlier land-administration features (see the README), unchanged and still covered by their tests and walkthroughs.
 
@@ -67,7 +69,7 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 
 | Item | What is missing |
 |---|---|
-| OpenAPI | Operations, parameters, security and error responses are described. Request and response bodies are not described field by field; they are enforced by Zod schemas in the code. |
+| OpenAPI responses | Requests are described field by field; responses only in outline (status codes and errors). Their TypeScript shapes are in `web/src/types.ts`. |
 | Front-end component tests | Cover the shared kit, the shell navigation and user management. The other pages rely on the browser walkthroughs. |
 | Styling | Plain CSS with design tokens rather than Tailwind (documented in [architecture.md](architecture.md)). |
 | Backups | On demand only. No schedule, no off-host copy, no encryption at rest. Document files are not included. |

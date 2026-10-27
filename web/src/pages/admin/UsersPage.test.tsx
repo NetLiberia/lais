@@ -1,5 +1,6 @@
-import { screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useLocation } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { renderApp, sessionFor, stubApi } from '../../test/render';
 import { UsersPage } from './UsersPage';
@@ -15,6 +16,11 @@ const USERS = {
   }],
   total: 1, page: 1, pageSize: 25,
 };
+/** Shows the current query string, so tests can check what the filters wrote to the URL. */
+function UrlProbe() {
+  return <output data-testid="url">{useLocation().search}</output>;
+}
+
 const ADMIN = sessionFor('system_admin', ['users.read', 'user.manage', 'roles.assign', 'reports.export']);
 
 async function openCreateForm() {
@@ -85,6 +91,30 @@ describe('User management', () => {
     await user.selectOptions(dialog.getByLabelText('County'), '1');
     await user.click(dialog.getByRole('button', { name: /Create and get activation link/ }));
     expect(await dialog.findByText('That username is already in use')).toBeInTheDocument();
+  });
+
+  it('keeps a filter chosen straight after clearing the search', async () => {
+    const user = userEvent.setup();
+    stubApi({ '/auth/session': ADMIN, '/admin/users': USERS, '/admin/counties': COUNTIES });
+    renderApp(<><UsersPage /><UrlProbe /></>, { path: '/admin/users' });
+    await screen.findByText('reg.mo');
+    await user.type(screen.getByLabelText('Search', { selector: 'input' }), 'proc');
+    await waitFor(() => expect(screen.getByTestId('url')).toHaveTextContent('q=proc'));
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }));
+    await user.selectOptions(screen.getByLabelText('Role'), 'registrar');
+    // Longer than the search box's 300 ms debounce: a late update must not wipe the role.
+    await new Promise((r) => setTimeout(r, 450));
+    expect(screen.getByTestId('url')).toHaveTextContent('role=registrar');
+    expect(screen.getByTestId('url')).not.toHaveTextContent('q=');
+  });
+
+  it('toggles the sort direction on two quick clicks', async () => {
+    stubApi({ '/auth/session': ADMIN, '/admin/users': USERS, '/admin/counties': COUNTIES });
+    renderApp(<><UsersPage /><UrlProbe /></>, { path: '/admin/users' });
+    const header = await screen.findByRole('button', { name: /Username/ });
+    // Both clicks in the same tick, before React re-renders: the second must see the first.
+    act(() => { header.click(); header.click(); });
+    await waitFor(() => expect(screen.getByTestId('url')).toHaveTextContent('sort=username&dir=desc'));
   });
 
   it('gives a supervisor a read-only view: no create or export without the capability', async () => {

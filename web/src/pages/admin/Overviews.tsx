@@ -1,22 +1,18 @@
 import { useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api, CASE_TYPE_LABELS } from '../../api';
-import { Badge, DataTable, EmptyState, fmtDateTime, Pagination, Panel, QueryState, type Column } from '../../components/kit';
+import { Badge, DataTable, EmptyState, fmtDateTime, Pagination, Panel, QueryState, usePatchParams, type Column } from '../../components/kit';
 import { ParcelMap } from '../../components/ParcelMap';
 
 interface County { id: number; code: string; name: string; enabled: boolean }
 
 function useFilters(keys: string[]) {
   const [params, setParams] = useSearchParams();
+  const patchParams = usePatchParams();
   const values = Object.fromEntries(keys.map((k) => [k, params.get(k) ?? ''])) as Record<string, string>;
   const page = Number(params.get('page') ?? 1);
   const pageSize = Number(params.get('pageSize') ?? 25);
-  const set = (patch: Record<string, string | number>) => {
-    const next = new URLSearchParams(params);
-    for (const [k, v] of Object.entries(patch)) { if (v === '') next.delete(k); else next.set(k, String(v)); }
-    if (!('page' in patch)) next.delete('page');
-    setParams(next, { replace: true });
-  };
+  const set = (patch: Record<string, string | number>) => patchParams(patch, { resetPage: true });
   const qs = new URLSearchParams([...Object.entries(values).filter(([, v]) => v), ['page', String(page)], ['pageSize', String(pageSize)]]).toString();
   return { values, page, pageSize, set, qs, clear: () => setParams(new URLSearchParams(), { replace: true }), any: Object.values(values).some(Boolean) };
 }

@@ -20,6 +20,7 @@ import { OWNERSHIP_TYPES } from '../services/shares.js';
 import { notifyUsers } from '../services/notify.js';
 import { detectDocumentType } from '../services/files.js';
 import { csvCell } from '../csv.js';
+import { documentBody, documentQuery } from '../openapi.js';
 
 export const casesRouter = Router();
 
@@ -376,6 +377,11 @@ casesRouter.patch('/:id', async (req, res) => {
     }
   });
   res.json({ ok: true });
+});
+
+/** Form fields of a geometry upload, for the API description; the handler checks `crs` against ACCEPTED_SRIDS. */
+const geometryFields = z.object({
+  crs: z.enum(Object.keys(ACCEPTED_SRIDS) as [string, ...string[]]).describe('EPSG code the file is in. Declared by the officer; never guessed.'),
 });
 
 casesRouter.post('/:id/geometry', geojsonUpload.single('file'), async (req, res) => {
@@ -781,3 +787,16 @@ casesRouter.post('/:id/publish', async (req, res) => {
     throw err;
   }
 });
+
+// API description (/api/openapi.json): the schemas above, as validated by the handlers.
+documentQuery('GET /cases', listQuery);
+documentBody('POST /cases', createBody);
+documentBody('PATCH /cases/{id}', attributesBody);
+documentBody('POST /cases/{id}/geometry', geometryFields);
+documentBody('POST /cases/{id}/features/{index}/exclusion', exclusionBody);
+documentBody('POST /cases/{id}/rights', rightBody);
+documentBody('POST /cases/{id}/documents', documentFields);
+documentBody('POST /cases/{id}/documents/{docId}/verify', verifyBody);
+documentBody('POST /cases/{id}/withdraw', withdrawBody);
+documentBody('POST /cases/{id}/findings/{findingId}/acknowledge', ackBody);
+documentBody('POST /cases/{id}/decision', decisionBody);

@@ -1,13 +1,73 @@
 import type { Router } from 'express';
+import { z, type ZodType } from 'zod';
 
 /**
  * OpenAPI 3.1 description of the LAIS API, generated at start-up from the mounted routers so the
  * list of operations always matches the code. Summaries are kept here; a test fails when a route
  * has no summary or a summary names a route that no longer exists.
  *
- * Request and response bodies are not described field by field: they are defined by the Zod schemas
- * next to each handler, which reject anything else with 400 and a list of the offending fields.
+ * Request bodies and query parameters come from the same Zod schemas the handlers validate with:
+ * each route module registers its schemas with documentBody() / documentQuery(). A test fails when a
+ * write route is not accounted for (JSON body, upload, or NO_BODY). Responses are described in
+ * outline only; their TypeScript shapes are in web/src/types.ts.
  */
+
+const BODIES = new Map<string, ZodType>();
+const QUERIES = new Map<string, ZodType>();
+
+/** Publishes `schema` as the request body of the given routes (`'POST /admin/users'`), and returns it unchanged. */
+export function documentBody<T extends ZodType>(keys: string | string[], schema: T): T {
+  for (const key of [keys].flat()) BODIES.set(key, schema);
+  return schema;
+}
+
+/** Publishes `schema` (a z.object) as the query parameters of the given routes, and returns it unchanged. */
+export function documentQuery<T extends ZodType>(keys: string | string[], schema: T): T {
+  for (const key of [keys].flat()) QUERIES.set(key, schema);
+  return schema;
+}
+
+export const documentedBodies = () => [...BODIES.keys()];
+export const documentedQueries = () => [...QUERIES.keys()];
+
+/** Write routes that take no request body. */
+export const NO_BODY = new Set([
+  'POST /auth/logout', 'POST /auth/mfa/enroll/start',
+  'POST /cases/{id}/rights/copy-from-source', 'DELETE /cases/{id}/rights/{rightId}',
+  'POST /cases/{id}/validate', 'POST /cases/{id}/submit', 'POST /cases/{id}/publish',
+  'POST /notifications/{id}/read', 'POST /notifications/read-all', 'POST /me/document-requests/{id}/withdraw',
+]);
+
+/** The schema as JSON Schema describing what a client sends (before coercion and defaults). */
+function jsonSchema(schema: ZodType): Record<string, unknown> {
+  const { $schema: _ignored, ...rest } = z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }) as Record<string, unknown>;
+  return rest;
+}
+
+function queryParameters(schema: ZodType) {
+  const s = jsonSchema(schema) as { properties?: Record<string, unknown>; required?: string[] };
+  return Object.entries(s.properties ?? {}).map(([name, prop]) => ({ name, in: 'query', required: s.required?.includes(name) ?? false, schema: prop }));
+}
+
+function requestBody(key: string, multipart: boolean) {
+  const schema = BODIES.get(key);
+  if (multipart) {
+    const fields = schema ? jsonSchema(schema) as { properties?: Record<string, unknown>; required?: string[] } : {};
+    return {
+      required: true,
+      content: {
+        'multipart/form-data': {
+          schema: {
+            type: 'object',
+            properties: { ...fields.properties, file: { type: 'string', format: 'binary' } },
+            required: [...(fields.required ?? []), 'file'],
+          },
+        },
+      },
+    };
+  }
+  return schema ? { required: true, content: { 'application/json': { schema: jsonSchema(schema) } } } : undefined;
+}
 
 export const SUMMARIES: Record<string, string> = {
   // Public portal
@@ -109,7 +169,7 @@ export const SUMMARIES: Record<string, string> = {
 };
 
 /** Routes that take multipart/form-data uploads. */
-const MULTIPART = new Set(['POST /cases/{id}/geometry', 'POST /cases/{id}/documents', 'POST /admin/counties/{id}/boundary']);
+export const MULTIPART = new Set(['POST /cases/{id}/geometry', 'POST /cases/{id}/documents', 'POST /admin/counties/{id}/boundary']);
 /** Auth routes that work without a session. */
 const NO_SESSION = new Set(['POST /auth/login', 'POST /auth/token/inspect', 'POST /auth/token/complete', 'GET /auth/session']);
 
@@ -136,7 +196,12 @@ export function buildOpenApi(mounts: Mount[]) {
   for (const r of listRoutes(mounts)) {
     const needsSession = r.mount.access === 'internal' || (r.mount.path === '/auth' && !NO_SESSION.has(r.key));
     const writes = r.method !== 'get';
-    const params = [...r.path.matchAll(/\{([A-Za-z0-9_]+)\}/g)].map((m) => ({ name: m[1], in: 'path', required: true, schema: { type: 'string' } }));
+    const query = QUERIES.get(r.key);
+    const params = [
+      ...[...r.path.matchAll(/\{([A-Za-z0-9_]+)\}/g)].map((m) => ({ name: m[1], in: 'path', required: true, schema: { type: 'string' } })),
+      ...(query ? queryParameters(query) : []),
+    ];
+    const body = writes ? requestBody(r.key, MULTIPART.has(r.key)) : undefined;
     const responses: Record<string, unknown> = {
       200: { description: 'Success' },
       400: { $ref: '#/components/responses/Invalid' },
@@ -153,8 +218,7 @@ export function buildOpenApi(mounts: Mount[]) {
       summary: SUMMARIES[r.key] ?? '(no summary)',
       operationId: r.key.replace(/[^A-Za-z0-9]+/g, '_').replace(/_$/, ''),
       ...(params.length ? { parameters: params } : {}),
-      ...(writes && MULTIPART.has(r.key) ? { requestBody: { required: true, content: { 'multipart/form-data': { schema: { type: 'object' } } } } } : {}),
-      ...(writes && !MULTIPART.has(r.key) ? { requestBody: { content: { 'application/json': { schema: { type: 'object' } } } } } : {}),
+      ...(body ? { requestBody: body } : {}),
       security: needsSession ? (writes ? [{ session: [], csrf: [] }] : [{ session: [] }]) : [],
       responses,
     };
@@ -165,8 +229,9 @@ export function buildOpenApi(mounts: Mount[]) {
       title: 'LAIS-Liberia API',
       version: '0.9.0',
       description: 'Research prototype on synthetic data. Every permission and county restriction is enforced by the server; '
-        + 'the role-permission matrix is available at GET /api/admin/permissions. Request bodies are validated by Zod schemas '
-        + 'in the server code and are not described field by field here.',
+        + 'the role-permission matrix is available at GET /api/admin/permissions. Request bodies and query parameters are '
+        + 'generated from the Zod schemas the server validates with, so a request matching them passes input validation. '
+        + 'Responses are described in outline only.',
     },
     servers: [{ url: '/api' }],
     paths,

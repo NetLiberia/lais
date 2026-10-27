@@ -2,12 +2,15 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { pool } from '../db.js';
 import { notFound, parseId } from '../http.js';
+import { documentQuery } from '../openapi.js';
 
 /** In-app notifications for the signed-in user. Users only ever see their own. */
 export const notificationsRouter = Router();
 
+const listQuery = documentQuery('GET /notifications', z.object({ unreadOnly: z.enum(['true', 'false']).default('false') }));
+
 notificationsRouter.get('/', async (req, res) => {
-  const unreadOnly = z.enum(['true', 'false']).default('false').parse(req.query.unreadOnly) === 'true';
+  const unreadOnly = listQuery.parse(req.query).unreadOnly === 'true';
   const { rows } = await pool.query(
     `SELECT id, category, title, body, link, created_at, read_at FROM lais.notification
       WHERE user_id = $1 AND ($2::boolean = false OR read_at IS NULL)

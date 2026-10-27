@@ -1,5 +1,41 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, ChevronLeft, ChevronRight, Info, Loader2, X, XCircle } from 'lucide-react';
+
+// ---------------------------------------------------------------------------
+// URL filters
+// ---------------------------------------------------------------------------
+
+type ParamPatch = Record<string, string | number | undefined>;
+
+/**
+ * Returns a function that changes some query parameters and keeps the rest. '' or undefined removes a
+ * key; `resetPage` also drops `page`, as any new filter should. A patch may be a function of the current
+ * parameters (e.g. to toggle a sort direction).
+ *
+ * It always builds on the newest parameters: those of the latest render, or its own write if React has
+ * not rendered that yet. Patching a render-time snapshot instead loses changes made in between, such as
+ * a filter chosen just after clearing the search, or the second of two quick clicks on a sort header.
+ */
+export function usePatchParams() {
+  const [params, setParams] = useSearchParams();
+  const state = useRef({ setParams, rendered: params.toString(), pending: null as string | null });
+  useEffect(() => {
+    const s = state.current;
+    s.setParams = setParams;
+    // Any change in the rendered URL (our write landing, or Back/Forward) supersedes a pending write.
+    if (params.toString() !== s.rendered) { s.rendered = params.toString(); s.pending = null; }
+  });
+  return useCallback((patch: ParamPatch | ((current: URLSearchParams) => ParamPatch), { resetPage = false }: { resetPage?: boolean } = {}) => {
+    const s = state.current;
+    const next = new URLSearchParams(s.pending ?? s.rendered);
+    const changes = typeof patch === 'function' ? patch(new URLSearchParams(next)) : patch;
+    for (const [k, v] of Object.entries(changes)) { if (v === '' || v === undefined) next.delete(k); else next.set(k, String(v)); }
+    if (resetPage && !('page' in changes)) next.delete('page');
+    s.pending = next.toString();
+    s.setParams(next, { replace: true });
+  }, []);
+}
 
 // ---------------------------------------------------------------------------
 // Toasts: only ever shown after the server has confirmed an action.

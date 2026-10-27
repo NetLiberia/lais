@@ -6,6 +6,7 @@ import { writeAudit } from '../audit.js';
 import { enforce } from '../authz/enforce.js';
 import { eligibleParty, REQUESTABLE_DOCUMENT_TYPES } from '../services/documentRequests.js';
 import { sendStoredDocument } from '../services/storedDocuments.js';
+import { documentBody } from '../openapi.js';
 
 /** Landowner portal: only the registered interests of the parties linked to this account. */
 export const meRouter = Router();
@@ -139,3 +140,6 @@ meRouter.get('/document-requests/:id/documents/:docId/file', async (req, res) =>
     detail: { requestId: id, requestNo: row.request_no },
   });
 });
+
+// API description (/api/openapi.json): the schemas above, as validated by the handlers.
+documentBody('POST /me/document-requests', requestBody);

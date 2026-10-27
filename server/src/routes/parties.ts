@@ -4,6 +4,7 @@ import { pool, tx } from '../db.js';
 import { badRequest, conflict, HttpError, notFound, parseId } from '../http.js';
 import { writeAudit } from '../audit.js';
 import { enforce } from '../authz/enforce.js';
+import { documentBody, documentQuery } from '../openapi.js';
 
 export const partiesRouter = Router();
 
@@ -106,3 +107,9 @@ partiesRouter.post('/:id/link-user', async (req, res) => {
   });
   res.json({ ok: true });
 });
+
+// API description (/api/openapi.json): the schemas above, as validated by the handlers.
+documentQuery('GET /parties', searchQuery);
+documentBody('POST /parties', createBody);
+documentBody('POST /parties/{id}/verify-identity', verifyBody);
+documentBody('POST /parties/{id}/link-user', linkBody);

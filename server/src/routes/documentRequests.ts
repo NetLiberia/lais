@@ -8,6 +8,7 @@ import { writeAudit } from '../audit.js';
 import { enforce } from '../authz/enforce.js';
 import { authorize, scopeFor, type ResourceContext } from '../authz/policy.js';
 import { candidateDocuments } from '../services/documentRequests.js';
+import { documentBody, documentQuery } from '../openapi.js';
 
 /**
  * Staff side of landowner document requests: a processor prepares the release set,
@@ -171,3 +172,8 @@ documentRequestsRouter.post('/:id/decide', async (req, res) => {
   });
   res.json({ status });
 });
+
+// API description (/api/openapi.json): the schemas above, as validated by the handlers.
+documentQuery('GET /document-requests', listQuery);
+documentBody('POST /document-requests/{id}/prepare', prepareBody);
+documentBody('POST /document-requests/{id}/decide', decideBody);

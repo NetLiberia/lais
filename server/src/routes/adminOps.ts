@@ -13,6 +13,7 @@ import { enforce } from '../authz/enforce.js';
 import { log } from '../logger.js';
 import { ACCEPTED_SRIDS, extractFeatures } from '../services/geojson.js';
 import { csvCell } from '../csv.js';
+import { documentBody, documentQuery } from '../openapi.js';
 
 /**
  * Operations API for administrators and supervisors: dashboard, activity, health, overviews, GIS job
@@ -138,9 +139,11 @@ const ACTIVITY_ACTIONS = [
   'settings.update', 'document_category.update', 'document_category.create', 'backup.run',
 ];
 
+const activityQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(25) });
+
 adminOpsRouter.get('/dashboard/activity', async (req, res) => {
   enforce(req, 'dashboard.view', {}, { entityType: 'dashboard' });
-  const limit = z.coerce.number().int().min(1).max(100).default(25).parse(req.query.limit);
+  const { limit } = activityQuery.parse(req.query);
   const { rows } = await pool.query(
     `SELECT e.chain_seq, e.at, e.actor_username, e.action, e.outcome, e.entity_type, e.entity_id, e.case_id,
             c.case_no, co.code AS county_code
@@ -277,13 +280,15 @@ const pageQuery = z.object({
   pageSize: z.coerce.number().int().refine((n) => [10, 25, 50, 100].includes(n)).default(25),
 });
 
+const applicationsQuery = pageQuery.extend({
+  status: z.string().max(20).optional(),
+  type: z.string().max(30).optional(),
+  countyId: z.coerce.number().int().optional(),
+});
+
 adminOpsRouter.get('/overview/applications', async (req, res) => {
   enforce(req, 'dashboard.view', {}, { entityType: 'case' });
-  const q = pageQuery.extend({
-    status: z.string().max(20).optional(),
-    type: z.string().max(30).optional(),
-    countyId: z.coerce.number().int().optional(),
-  }).parse(req.query);
+  const q = applicationsQuery.parse(req.query);
   const status = q.status === 'open' ? OPEN : q.status ? [q.status] : null;
   const params = [status, q.type ?? null, q.countyId ?? null];
   const [items, byType] = await Promise.all([
@@ -323,13 +328,15 @@ adminOpsRouter.get('/overview/parcels', async (req, res) => {
   res.json(rows);
 });
 
+const conflictsQuery = pageQuery.extend({
+  status: z.enum(['open', 'acknowledged', 'closed']).optional(),
+  countyId: z.coerce.number().int().optional(),
+  code: z.string().max(40).optional(),
+});
+
 adminOpsRouter.get('/overview/conflicts', async (req, res) => {
   enforce(req, 'dashboard.view', {}, { entityType: 'conflict' });
-  const q = pageQuery.extend({
-    status: z.enum(['open', 'acknowledged', 'closed']).optional(),
-    countyId: z.coerce.number().int().optional(),
-    code: z.string().max(40).optional(),
-  }).parse(req.query);
+  const q = conflictsQuery.parse(req.query);
   const params = [q.status ?? null, q.countyId ?? null, q.code ?? null];
   const [items, byCode] = await Promise.all([
     pool.query(
@@ -360,12 +367,14 @@ const JOB_STATUS_SQL = `CASE WHEN b.status = 'published' THEN 'published'
                              WHEN r.error_count > 0 THEN 'failed_validation'
                              ELSE 'passed_validation' END`;
 
+const gisJobsQuery = pageQuery.extend({
+  status: z.enum(['published', 'superseded', 'awaiting_validation', 'failed_validation', 'passed_validation']).optional(),
+  countyId: z.coerce.number().int().optional(),
+});
+
 adminOpsRouter.get('/gis-jobs', async (req, res) => {
   enforce(req, 'gis.sync.read', {}, { entityType: 'staging_batch' });
-  const q = pageQuery.extend({
-    status: z.enum(['published', 'superseded', 'awaiting_validation', 'failed_validation', 'passed_validation']).optional(),
-    countyId: z.coerce.number().int().optional(),
-  }).parse(req.query);
+  const q = gisJobsQuery.parse(req.query);
   const { rows } = await pool.query(
     `SELECT * FROM (
        SELECT b.id, b.source_filename, b.declared_srid, b.feature_count AS received, b.created_at AS started_at,
@@ -787,3 +796,17 @@ adminOpsRouter.get('/reports/:name.csv', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.send(lines.join('\r\n'));
 });
+
+// API description (/api/openapi.json): the schemas above, as validated by the handlers.
+documentQuery('GET /admin/dashboard/charts', rangeQuery);
+documentQuery('GET /admin/dashboard/activity', activityQuery);
+documentQuery('GET /admin/overview/applications', applicationsQuery);
+documentQuery('GET /admin/overview/conflicts', conflictsQuery);
+documentQuery('GET /admin/gis-jobs', gisJobsQuery);
+documentBody('PATCH /admin/counties/{id}', countyBody);
+documentBody('POST /admin/counties/{id}/boundary', boundaryFields);
+documentBody('POST /admin/counties/{id}/verify-boundary', verifyBody);
+documentBody('PUT /admin/settings/{key}', settingBody);
+documentBody('POST /admin/document-categories', categoryCreate);
+documentBody('PATCH /admin/document-categories/{code}', categoryUpdate);
+documentBody('POST /admin/backups', backupBody);

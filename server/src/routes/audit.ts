@@ -4,6 +4,7 @@ import { pool } from '../db.js';
 import { HttpError } from '../http.js';
 import { writeAudit } from '../audit.js';
 import { authorize } from '../authz/policy.js';
+import { documentQuery } from '../openapi.js';
 
 /**
  * Supervisors and auditors see the full trail (read-only). System administrators see security and
@@ -72,3 +73,6 @@ auditRouter.get('/verify', async (req, res) => {
   await writeAudit(req, { action: 'audit.verify_chain', outcome: intact ? 'success' : 'failure', detail: { checked: Number(result.checked), firstBadSeq: result.first_bad_seq } });
   res.json({ intact, checked: Number(result.checked), firstBadSeq: result.first_bad_seq });
 });
+
+// API description (/api/openapi.json): the schemas above, as validated by the handlers.
+documentQuery('GET /audit', listQuery);

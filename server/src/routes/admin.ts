@@ -9,6 +9,7 @@ import { COUNTY_SCOPED_ROLES, permissionMatrix, ROLES, roleCombinationProblem, t
 import { revokeAllSessions } from '../auth/session.js';
 import { issueAccountToken } from '../services/accountTokens.js';
 import { notifyUsers } from '../services/notify.js';
+import { documentBody, documentQuery } from '../openapi.js';
 
 /**
  * Staff account and role administration. Administrators manage accounts but hold no legal decision
@@ -369,3 +370,11 @@ adminRouter.get('/permissions', async (req, res) => {
   );
   res.json({ roles: ROLES.map((role) => ({ role, activeUsers: counts.find((c) => c.role === role)?.users ?? 0, countyScoped: COUNTY_SCOPED_ROLES.includes(role) })), permissions: permissionMatrix() });
 });
+
+// API description (/api/openapi.json): the schemas above, as validated by the handlers.
+documentQuery('GET /admin/users', listQuery);
+documentBody('POST /admin/users', createBody);
+documentBody('PATCH /admin/users/{id}', profileBody);
+documentBody('POST /admin/users/{id}/status', statusBody);
+documentBody(['POST /admin/users/{id}/password-reset', 'POST /admin/users/{id}/activation-link', 'POST /admin/users/{id}/roles/{grantId}/revoke'], reasonBody);
+documentBody('POST /admin/users/{id}/roles', grantBody);

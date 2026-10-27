@@ -1257,6 +1257,29 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
       expect(res.body.paths['/admin/users'].get.security).toEqual([{ session: [] }]);
       expect(res.body.paths['/public/parcels'].get.security).toEqual([]);
       expect(res.body.paths['/auth/login'].post.security).toEqual([]);
+      // Request bodies and query parameters come from the handlers' own Zod schemas.
+      const { documentedBodies, documentedQueries, MULTIPART, NO_BODY } = await import('../../src/openapi.js');
+      const writes = listRoutes(API_MOUNTS).filter((r) => r.method !== 'get').map((r) => r.key);
+      const bodies = documentedBodies();
+      expect(writes.filter((k) => !bodies.includes(k) && !NO_BODY.has(k) && !MULTIPART.has(k)), 'write routes with no documented body').toEqual([]);
+      for (const k of [...bodies, ...documentedQueries(), ...NO_BODY]) expect(routes, `documented route ${k}`).toContain(k);
+
+      const createUser = res.body.paths['/admin/users'].post.requestBody.content['application/json'].schema;
+      expect(Object.keys(createUser.properties)).toEqual(expect.arrayContaining(['displayName', 'username', 'roles', 'reason']));
+      expect(createUser.required).toEqual(expect.arrayContaining(['username', 'roles', 'reason']));
+      expect(JSON.stringify(createUser.properties.roles)).not.toMatch(/surveyor/);
+      const listUsers = res.body.paths['/admin/users'].get.parameters.map((p: any) => p.name);
+      expect(listUsers).toEqual(expect.arrayContaining(['q', 'role', 'status', 'sort', 'page', 'pageSize']));
+      const upload = res.body.paths['/cases/{id}/documents'].post.requestBody.content['multipart/form-data'].schema;
+      expect(upload.required).toEqual(expect.arrayContaining(['docType', 'classification', 'file']));
+      expect(upload.properties.classification.enum).toEqual(['public', 'restricted', 'highly_sensitive']);
+      expect(res.body.paths['/cases/{id}/submit'].post.requestBody).toBeUndefined();
+
+      // A well-formed OpenAPI 3.1 document, checked against the official schema.
+      const { Validator } = await import('@seriousme/openapi-schema-validator');
+      const validation = await new Validator().validate(res.body);
+      expect(validation.errors ?? [], 'OpenAPI schema errors').toEqual([]);
+      expect(validation.valid).toBe(true);
       // Lists endpoints only: no data and no secrets.
       expect(JSON.stringify(res.body)).not.toMatch(/password_hash|PROV-MO|example\.invalid/);
     });
