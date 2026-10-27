@@ -756,14 +756,14 @@ casesRouter.post('/:id/decision', async (req, res) => {
   res.json({ status });
 });
 
-const publishBody = z.object({ simulateFailure: z.boolean().optional() }).default({});
+const publishBody = z.object({ simulateFailure: z.boolean().optional(), simulateDelayMs: z.number().int().min(0).max(5000).optional() }).default({});
 
 casesRouter.post('/:id/publish', async (req, res) => {
   const body = publishBody.parse(req.body ?? {});
   const id = parseId(req.params.id);
   try {
     const outcome = await inCaseTx(req, 'case.publish', (client, cs) =>
-      publishApprovedCase(client, req, cs, { simulateFailure: isTest && body.simulateFailure }),
+      publishApprovedCase(client, req, cs, isTest ? { simulateFailure: body.simulateFailure, simulateDelayMs: body.simulateDelayMs } : {}),
     );
     if (!outcome.published) {
       return res.status(409).json({ error: `${outcome.reason}. Publication was refused and the case has been returned to review.`, findings: outcome.findings });

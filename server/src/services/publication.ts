@@ -25,7 +25,7 @@ export async function publishApprovedCase(
   client: pg.PoolClient,
   req: Request,
   cs: CaseRow,
-  opts: { simulateFailure?: boolean } = {},
+  opts: { simulateFailure?: boolean; simulateDelayMs?: number } = {},
 ): Promise<PublishOutcome> {
   const actorId = req.auth!.user.id;
   const { rows: [approval] } = await client.query(
@@ -66,6 +66,12 @@ export async function publishApprovedCase(
       detail: { reason: reopenReason, reopened: true, errorCount: errors.length, newWarningCount: newWarnings.length },
     }, client);
     return { published: false, reason: reopenReason, findings: [...errors, ...newWarnings] };
+  }
+
+  if (opts.simulateDelayMs) {
+    // Test hook for the concurrency evaluation: widens the window between checking for conflicts and
+    // writing, which the per-county lock above must protect.
+    await client.query('SELECT pg_sleep($1)', [opts.simulateDelayMs / 1000]);
   }
 
   const result = cs.case_type === 'first_registration'

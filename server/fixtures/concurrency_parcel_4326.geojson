@@ -1,0 +1,39 @@
+{
+ "type": "FeatureCollection",
+ "name": "SYNTHETIC parcel used by the concurrent-publication test",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "note": "SYNTHETIC"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.66,
+       6.36
+      ],
+      [
+       -10.6592,
+       6.36
+      ],
+      [
+       -10.6592,
+       6.3608
+      ],
+      [
+       -10.66,
+       6.3608
+      ],
+      [
+       -10.66,
+       6.36
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

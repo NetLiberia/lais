@@ -65,6 +65,8 @@ CREATE EXTENSION postgis;
 
 Creating the extension as `postgres` means the app's own account does not need superuser rights.
 
+**Shortcut:** once PostgreSQL is running, `powershell -ExecutionPolicy Bypass -File serverscriptssetup-local-db.ps1` does steps 1.3 and 2 for you. It prompts for the `postgres` password and a new `lais_owner` password, creates both databases with PostGIS, and writes `server/.env`. Passwords are typed into the script, not stored in any shared file.
+
 ### 2. Configure
 
 ```bash
@@ -98,7 +100,9 @@ npm test
 ```
 
 - **38 unit tests**: permission matrix, cross-county denial, separation of duties, workflow (including a check that the TypeScript transition table matches the SQL trigger), TOTP RFC test vectors, password hashing, GeoJSON/CRS intake, fractional shares, file sniffing.
-- **68 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration, transfer, subdivision, consolidation, correction, legacy-migration and confirmation lifecycles, landowner document requests, rate limits, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, and admin limits.
+- **70 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration, transfer, subdivision, consolidation, correction, legacy-migration and confirmation lifecycles, landowner document requests, rate limits, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, and admin limits. Two concurrency tests run only against a real multi-connection server. One publishes two overlapping parcels at the same moment and checks that the per-county lock lets only one through (verified to fail with the lock removed). The other checks that the audit hash chain survives 40 parallel writers.
+
+Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 108 tests in about 12 seconds with the default 10-connection pool, plus six scripted browser walkthroughs.
 
 ## Demo accounts (synthetic)
 

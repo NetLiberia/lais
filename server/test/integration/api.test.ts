@@ -968,4 +968,38 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
       expect((await as('proc.mo').post(`/api/document-requests/${created.body.id}/prepare`, { documentIds: [], note: 'Too late' })).status).toBe(409);
     });
   });
+
+  // Real parallelism needs a multi-connection database; the embedded test server runs with one connection.
+  describe.skipIf(process.env.DATABASE_POOL_MAX === '1')('concurrency (real PostgreSQL)', () => {
+    it('publishes only one of two overlapping parcels approved at the same time', async () => {
+      const a = await prepareRegistration('concurrency_parcel_4326.geojson', { owner: 'Hawa' });
+      const b = await prepareRegistration('concurrency_parcel_4326.geojson', { owner: 'Joseph' });
+      for (const id of [a, b]) {
+        await submit(id);
+        await acknowledgeAll(id); // each was warned about the other open submission
+        expect((await approve(id)).status).toBe(200);
+      }
+      // Publish both at once. The per-county lock serialises them, so the second sees the first and is reopened.
+      // A test-only pause between the conflict check and the write forces the two to overlap in time.
+      const results = await Promise.all([a, b].map((id) => as('reg.mo').post(`/api/cases/${id}/publish`, { simulateDelayMs: 1500 })));
+      expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+      const { rows } = await pool.query(
+        `SELECT count(*)::int AS n FROM lais.parcel_version v JOIN lais.land_case c ON c.id = v.published_by_case WHERE c.id = ANY($1)`,
+        [[a, b]],
+      );
+      expect(rows[0].n).toBe(1);
+      const reopened = results.findIndex((r) => r.status === 409);
+      expect((await caseDetail([a, b][reopened])).validation.findings.map((f: any) => f.code)).toContain('DUPLICATE_GEOMETRY_SUSPECTED');
+    });
+
+    it('keeps the audit hash chain intact under parallel writes', async () => {
+      const before = (await pool.query('SELECT count(*)::int AS n FROM audit.event')).rows[0].n;
+      // 40 parallel requests that each write an audit event (internal parcel views are logged).
+      await Promise.all(Array.from({ length: 40 }, (_, i) => as(i % 2 ? 'reg.mo' : 'supervisor').get('/api/parcels/PROV-MO-000002')));
+      const after = (await pool.query('SELECT count(*)::int AS n FROM audit.event')).rows[0].n;
+      expect(after - before).toBeGreaterThanOrEqual(40);
+      const verify = await as('auditor').get('/api/audit/verify');
+      expect(verify.body).toMatchObject({ intact: true });
+    });
+  });
 });
