@@ -96,6 +96,11 @@ const createBody = z.discriminatedUnion('caseType', [
     sourceReference: z.string().max(200).optional(),
   }),
   z.object({
+    caseType: z.literal('migration'),
+    countyId: z.number().int(),
+    sourceReference: z.string().max(200).optional(),
+  }),
+  z.object({
     caseType: z.literal('correction'),
     parcelUpi: z.string().min(1).max(40),
     correctionReason: z.string().trim().max(2000).optional(),
@@ -118,12 +123,14 @@ casesRouter.post('/', async (req, res) => {
     let sourceReference: string | null = body.caseType === 'correction' ? null : body.sourceReference ?? null;
     let areaSurveyed: string | null = null;
 
-    if (body.caseType === 'first_registration') {
+    if (body.caseType === 'first_registration' || body.caseType === 'migration') {
       countyId = body.countyId;
       const exists = await client.query('SELECT 1 FROM lais.county WHERE id = $1', [countyId]);
       if (!exists.rows[0]) throw badRequest('Unknown county');
-      landCategory = body.landCategory ?? null;
-      landUse = body.landUse ?? null;
+      if (body.caseType === 'first_registration') {
+        landCategory = body.landCategory ?? null;
+        landUse = body.landUse ?? null;
+      }
     } else {
       // Jurisdiction comes from the published parcels, not from the request.
       const upis = body.caseType === 'consolidation' ? [...new Set(body.parcelUpis)] : [body.parcelUpi];
@@ -224,6 +231,10 @@ casesRouter.get('/:id', async (req, res) => {
       `SELECT b.id AS batch_id, b.source_filename, b.declared_srid, b.created_at, u.username AS uploaded_by,
               coalesce((SELECT json_agg(json_build_object(
                          'index', f.feature_index,
+                         'properties', f.properties,
+                         'excluded', f.excluded,
+                         'exclusion_reason', f.exclusion_reason,
+                         'published_upi', (SELECT upi FROM lais.parcel WHERE id = f.published_parcel_id),
                          'structural_ok', f.structural_ok,
                          'structural_message', f.structural_message,
                          'geometry', ST_AsGeoJSON(coalesce(f.geom, ST_Transform(f.geom_input, 4326)), 7)::json,
@@ -326,6 +337,9 @@ casesRouter.patch('/:id', async (req, res) => {
     if (cs.case_type === 'transfer' && (body.landCategory !== undefined || body.landUse !== undefined || body.proposedUpi !== undefined)) {
       throw badRequest('A transfer does not change the parcel category, land use or identifier');
     }
+    if (cs.case_type === 'migration' && (body.landCategory !== undefined || body.landUse !== undefined)) {
+      throw badRequest('In a migration, land category and use come from each feature in the file');
+    }
     if (cs.case_type !== 'first_registration' && body.proposedUpi) {
       throw badRequest('Only a first registration can propose an identifier');
     }
@@ -412,6 +426,90 @@ casesRouter.post('/:id/geometry', geojsonUpload.single('file'), async (req, res)
     return { batchId: batch.id, featureCount: features.length, structuralOk: invalid.length === 0, problem: invalid.join('; ') || null };
   });
   res.status(201).json(result);
+});
+
+const exclusionBody = z.object({
+  excluded: z.boolean(),
+  reason: z.string().trim().max(500).optional(),
+});
+
+/**
+ * Migration quarantine: a GIS officer excludes a problem feature (with a reason) so the rest of the batch
+ * can proceed, or includes it again. Excluded features are reported but never published.
+ */
+casesRouter.post('/:id/features/:index/exclusion', async (req, res) => {
+  const index = z.coerce.number().int().min(0).max(999).parse(req.params.index);
+  const body = exclusionBody.parse(req.body);
+  if (body.excluded && (!body.reason || body.reason.length < 5)) throw badRequest('Give a reason for excluding the feature (5+ characters)');
+  await inCaseTx(req, 'case.import_geometry', async (client, cs) => {
+    if (cs.case_type !== 'migration') throw badRequest('Only features of a migration batch can be excluded');
+    const { rowCount } = await client.query(
+      `UPDATE staging.feature f SET excluded = $3, exclusion_reason = $4
+         FROM staging.batch b
+        WHERE b.id = f.batch_id AND b.case_id = $1 AND b.status = 'active' AND f.feature_index = $2`,
+      [cs.id, index, body.excluded, body.excluded ? body.reason : null],
+    );
+    if (!rowCount) throw notFound('No such feature in the active batch');
+    const note = body.excluded ? `Feature ${index + 1} excluded: ${body.reason}` : `Feature ${index + 1} included again`;
+    await recordEvent(client, cs.id, req.auth!.user.id, 'update_attributes', note);
+    await writeAudit(req, { action: 'staging.feature_exclusion', outcome: 'success', entityType: 'case', entityId: cs.id, caseId: cs.id, countyId: cs.county_id, detail: { featureIndex: index, excluded: body.excluded, reason: body.reason ?? null } }, client);
+  });
+  res.json({ ok: true });
+});
+
+const csvCell = (v: unknown) => {
+  const t = v === null || v === undefined ? '' : String(v);
+  // Quote every cell and neutralise spreadsheet formulas in data that came from a legacy file.
+  return `"${(/^[=+\-@]/.test(t) ? `'${t}` : t).replace(/"/g, '""')}"`;
+};
+
+/**
+ * Reconciliation report for a migration batch: one row per imported feature with its outcome,
+ * so feature counts can be checked before and after processing.
+ */
+casesRouter.get('/:id/migration-report.csv', async (req, res) => {
+  const id = parseId(req.params.id);
+  const cs = await getCase(pool, id);
+  enforce(req, 'case.view', await caseContext(pool, cs), { entityType: 'case', entityId: cs.id, caseId: cs.id });
+  if (cs.case_type !== 'migration') throw badRequest('Only migration cases have a reconciliation report');
+
+  const { rows: features } = await pool.query(
+    `SELECT f.feature_index, f.properties, f.excluded, f.exclusion_reason, f.structural_ok, p.upi AS published_upi,
+            CASE WHEN f.geom IS NOT NULL THEN round(ST_Area(f.geom::geography)::numeric, 2) END AS area_m2
+       FROM staging.batch b JOIN staging.feature f ON f.batch_id = b.id
+       LEFT JOIN lais.parcel p ON p.id = f.published_parcel_id
+      WHERE b.case_id = $1 AND b.status IN ('active', 'published')
+      ORDER BY f.feature_index`,
+    [cs.id],
+  );
+  const latest = await latestRun(pool, cs.id);
+  const findingsFor = (i: number, severity: string) =>
+    (latest?.findings ?? []).filter((f) => f.feature_index === i && f.severity === severity);
+
+  const header = ['feature', 'legacy_ref', 'land_category', 'holders', 'calculated_area_m2', 'outcome', 'upi', 'errors', 'warnings', 'notes'];
+  const lines = [header.map(csvCell).join(',')];
+  for (const f of features) {
+    const errors = findingsFor(f.feature_index, 'error');
+    const warnings = findingsFor(f.feature_index, 'warning');
+    const outcome = f.published_upi ? 'published' : f.excluded ? 'excluded' : errors.length ? 'error' : warnings.length ? 'warning' : 'ready';
+    lines.push([
+      f.feature_index + 1, f.properties.legacy_ref, f.properties.land_category, f.properties.holder_names, f.area_m2,
+      outcome, f.published_upi, errors.map((e) => e.code).join(' '), warnings.map((w) => w.code).join(' '),
+      f.excluded ? f.exclusion_reason : [...errors, ...warnings].map((x) => x.message).join(' | '),
+    ].map(csvCell).join(','));
+  }
+  const totals = features.reduce((acc: Record<string, number>, f) => {
+    const k = f.published_upi ? 'published' : f.excluded ? 'excluded' : 'pending';
+    acc[k] = (acc[k] ?? 0) + 1;
+    return acc;
+  }, {});
+  lines.push('', `"# ${features.length} feature(s) imported: ${Object.entries(totals).map(([k, v]) => `${v} ${k}`).join(', ')}"`);
+
+  await writeAudit(req, { action: 'case.migration_report', outcome: 'success', entityType: 'case', entityId: cs.id, caseId: cs.id, countyId: cs.county_id });
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${cs.case_no}-reconciliation.csv"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(lines.join('\r\n'));
 });
 
 const rightBody = z.object({

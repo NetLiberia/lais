@@ -26,7 +26,14 @@ publicRouter.use(rateLimit({
   skip: (req) => req.auth?.state === 'active',
 }));
 
-const STATUS_LABEL = `CASE p.status WHEN 'active' THEN 'registered' WHEN 'disputed' THEN 'under dispute' ELSE p.status END`;
+// "registered" only when at least one interest has been confirmed through an approved case; parcels
+// migrated from a legacy register carry documented (unverified) interests until then.
+const STATUS_LABEL = `CASE
+    WHEN p.status = 'disputed' THEN 'under dispute'
+    WHEN p.status <> 'active' THEN p.status
+    WHEN EXISTS (SELECT 1 FROM lais.rrr r WHERE r.parcel_id = p.id AND r.valid_to IS NULL AND r.interest_status = 'registered') THEN 'registered'
+    ELSE 'recorded, interests not yet verified'
+  END`;
 
 publicRouter.get('/counties', async (_req, res) => {
   const { rows } = await pool.query(

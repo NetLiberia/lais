@@ -140,3 +140,5 @@ tr.muted td { color: var(--muted); }
 .map-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border-radius: 2px; vertical-align: middle; }
 .map-legend i.dashed { border: 2px dashed #555; background: transparent; }
 .changed { color: var(--warn-text); font-weight: 600; }
+.table-scroll { max-height: 420px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+.compact-plain { gap: 0.5rem; }

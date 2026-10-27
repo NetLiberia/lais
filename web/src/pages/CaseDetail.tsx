@@ -32,9 +32,11 @@ export function CaseDetail() {
     overlays.push({
       id: `staged-${f.index}`,
       data: f.geometry,
-      color: f.structural_ok ? '#e07b00' : '#b00020',
-      dashed: !f.structural_ok,
-      label: `${many ? `New parcel ${f.index + 1}` : 'Proposed geometry'}${f.structural_ok ? ' (staging)' : ' (invalid)'}`,
+      color: f.excluded ? '#888' : f.structural_ok ? '#e07b00' : '#b00020',
+      dashed: f.excluded || !f.structural_ok,
+      label: cs.case_type === 'migration'
+        ? (f.index === 0 ? 'Legacy parcels (staging)' : undefined)
+        : `${many ? `New parcel ${f.index + 1}` : 'Proposed geometry'}${f.structural_ok ? ' (staging)' : ' (invalid)'}`,
     });
   }
   if (data.parcel?.geometry && (cs.case_type === 'transfer' || cs.case_type === 'correction')) {
@@ -67,7 +69,9 @@ export function CaseDetail() {
           {data.sources.map((s: any) => (
             <CurrentRights key={s.upi} parcel={s} note="When this case is published the parcel is retired: all its current interests end, including encumbrances. Record on the new parcel(s) every interest that continues." />
           ))}
-          {cs.case_type === 'correction'
+          {cs.case_type === 'migration'
+            ? <Section title="Rights"><p className="small muted">Holders named in the legacy file are recorded as documented interests with unverified identities, never as registered interests. Confirming them is a separate, later step.</p></Section>
+            : cs.case_type === 'correction'
             ? <Section title="Rights"><p className="small muted">A correction never changes who holds an interest. Use a transfer case for that.</p></Section>
             : <Rights data={data} editable={can('case.edit_rights')} act={act} caseId={id!} featureCount={features.length} />}
           <Documents data={data} canUpload={can('case.upload_document')} act={act} caseId={id!} />
@@ -79,7 +83,7 @@ export function CaseDetail() {
               : data.staged
                 ? <div className="small">
                     <p>Imported {data.staged.source_filename} (declared EPSG:{data.staged.declared_srid}) by {data.staged.uploaded_by}, {fmtDate(data.staged.created_at)}.</p>
-                    <ul className="plain">
+                    {cs.case_type === 'migration' ? <MigrationFeatures data={data} act={act} caseId={id!} canExclude={can('case.import_geometry')} /> : <ul className="plain">
                       {features.map((f) => (
                         <li key={f.index}>
                           {many && <strong>New parcel {f.index + 1}: </strong>}
@@ -87,10 +91,11 @@ export function CaseDetail() {
                           {!f.structural_ok && <strong className="danger"> invalid: {f.structural_message}</strong>}
                         </li>
                       ))}
-                    </ul>
+                    </ul>}
                   </div>
                 : <p className="small muted">
-                    {cs.case_type === 'correction' ? 'The boundary stays as published unless you import a corrected one.'
+                    {cs.case_type === 'migration' ? 'Import the legacy parcels as one GeoJSON FeatureCollection (up to 1000 features).'
+                      : cs.case_type === 'correction' ? 'The boundary stays as published unless you import a corrected one.'
                       : cs.case_type === 'subdivision' ? 'Import one GeoJSON file containing every new parcel (2 or more features).'
                       : cs.case_type === 'consolidation' ? 'Import the merged parcel as a single feature.'
                       : 'No geometry imported yet.'}
@@ -150,7 +155,8 @@ function Attributes({ data, editable, onSave }: { data: any; editable: boolean; 
   });
   const registration = cs.case_type === 'first_registration';
   const correction = cs.case_type === 'correction';
-  const createsParcels = cs.case_type !== 'transfer';
+  // In a migration, category and use come from each feature; the case only names its source.
+  const createsParcels = cs.case_type !== 'transfer' && cs.case_type !== 'migration';
   // For a correction, the published values the case would change.
   const pub = correction ? data.parcel : null;
   const submit = (e: FormEvent) => {
@@ -509,5 +515,66 @@ function Actions({ data, act, caseId, can }: { data: any; act: (fn: () => Promis
         )}
       </div>
     </Section>
+  );
+}
+
+/** Per-feature view of a migration batch: legacy attributes, findings, quarantine and outcome. */
+function MigrationFeatures({ data, act, caseId, canExclude }: { data: any; act: (fn: () => Promise<unknown>) => Promise<void>; caseId: string; canExclude: boolean }) {
+  const [onlyProblems, setOnlyProblems] = useState(false);
+  const features: any[] = data.staged?.features ?? [];
+  const findings: any[] = data.validation?.findings ?? [];
+  const forFeature = (i: number) => findings.filter((f) => f.feature_index === i);
+  const counts = { total: features.length, excluded: features.filter((f) => f.excluded).length, published: features.filter((f) => f.published_upi).length };
+  const shown = onlyProblems ? features.filter((f) => f.excluded || forFeature(f.index).length > 0 || !f.structural_ok) : features;
+
+  const toggle = (f: any) => {
+    if (f.excluded) {
+      void act(() => api(`/cases/${caseId}/features/${f.index}/exclusion`, { body: { excluded: false } }));
+      return;
+    }
+    const reason = window.prompt(`Why exclude feature ${f.index + 1} (${f.properties.legacy_ref ?? 'no legacy_ref'}) from this batch?`);
+    if (reason) void act(() => api(`/cases/${caseId}/features/${f.index}/exclusion`, { body: { excluded: true, reason } }));
+  };
+
+  return (
+    <div className="stack compact-plain">
+      <div className="row wrap">
+        <strong>{counts.total} feature(s)</strong>
+        <span className="muted">{counts.excluded} excluded{counts.published > 0 && `, ${counts.published} published`}</span>
+        <label className="inline"><input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} /> only features with findings</label>
+        <a href={`/api/cases/${caseId}/migration-report.csv`}>Download reconciliation report (CSV)</a>
+      </div>
+      <div className="table-scroll">
+        <table className="table">
+          <thead><tr><th>#</th><th>Legacy ref</th><th>Category</th><th>Holders</th><th>Area m²</th><th>Findings</th><th>Outcome</th>{canExclude && <th />}</tr></thead>
+          <tbody>
+            {shown.map((f) => {
+              const list = forFeature(f.index);
+              const errors = list.filter((x) => x.severity === 'error').length;
+              const warnings = list.length - errors;
+              return (
+                <tr key={f.index} className={f.excluded ? 'muted' : ''}>
+                  <td>{f.index + 1}</td>
+                  <td>{f.properties.legacy_ref ?? <span className="danger">missing</span>}</td>
+                  <td>{f.properties.land_category ?? '—'}</td>
+                  <td className="small">{f.properties.holder_names ?? '—'}</td>
+                  <td>{f.area_m2 ? Number(f.area_m2).toLocaleString() : '—'}</td>
+                  <td className="small" title={list.map((x) => x.message).join('\n')}>
+                    {errors > 0 && <span className="pill sev-error">{errors} error{errors > 1 ? 's' : ''}</span>}{' '}
+                    {warnings > 0 && <span className="pill sev-warn">{warnings} warning{warnings > 1 ? 's' : ''}</span>}
+                  </td>
+                  <td className="small">
+                    {f.published_upi ? <Link to={`/work/parcels/${f.published_upi}`}>{f.published_upi}</Link>
+                      : f.excluded ? <>excluded<div className="muted">{f.exclusion_reason}</div></> : 'pending'}
+                  </td>
+                  {canExclude && <td><button className="link" onClick={() => toggle(f)}>{f.excluded ? 'Include' : 'Exclude'}</button></td>}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="small muted">Hover over a findings cell for details. Excluded features stay in the report but are never published; fix them in the GIS tool and migrate them in a later batch.</p>
+    </div>
   );
 }

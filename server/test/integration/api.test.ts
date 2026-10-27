@@ -631,6 +631,110 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
     });
   });
 
+  describe('legacy migration', () => {
+    const codes = (r: { findings: { code: string }[] }) => r.findings.map((f) => f.code);
+
+    async function openMigration(file: string, source = 'SYNTHETIC 1990 county register extract') {
+      const created = await as('gis.mo').post('/api/cases', { caseType: 'migration', countyId: 1, sourceReference: source });
+      expect(created.status).toBe(201);
+      const id = created.body.id as string;
+      expect((await as('gis.mo').upload(`/api/cases/${id}/geometry`, fixture(file), file, { crs: '4326' })).status).toBe(201);
+      const doc = await as('gis.mo').upload(`/api/cases/${id}/documents`, fixture('synthetic_document.pdf'), 'register-extract.pdf', { docType: 'other', classification: 'restricted', referenceNo: 'REGISTER-EXTRACT' });
+      expect((await as('proc.mo').post(`/api/cases/${id}/documents/${doc.body.id}/verify`, { status: 'verified', note: 'Extract matches the register' })).status).toBe(200);
+      return id;
+    }
+
+    async function report(id: string) {
+      const res = await as('reg.mo').get(`/api/cases/${id}/migration-report.csv`);
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toMatch(/text\/csv/);
+      return res.text.split('\r\n');
+    }
+
+    let problemCase = '';
+
+    it('flags each faulty legacy record against its own feature', async () => {
+      problemCase = await openMigration('legacy_register_problems_mo_4326.geojson');
+      const result = await submit(problemCase);
+      expect(result.status).toBe('returned');
+      const byFeature = new Map<number, string[]>();
+      for (const f of (await caseDetail(problemCase)).validation.findings) {
+        byFeature.set(f.feature_index, [...(byFeature.get(f.feature_index) ?? []), f.code]);
+      }
+      expect(byFeature.get(0)).toBeUndefined();
+      expect(byFeature.get(1)).toContain('DUPLICATE_LEGACY_REF');
+      expect(byFeature.get(2)).toContain('DUPLICATE_LEGACY_REF');
+      expect(byFeature.get(3)).toContain('LEGACY_ATTRIBUTE_INVALID');
+      expect(byFeature.get(4)).toContain('GEOMETRY_INVALID');
+      expect(byFeature.get(5)).toContain('MIGRATION_INTERNAL_OVERLAP');
+      expect(byFeature.get(7)).toContain('LEGACY_ATTRIBUTE_INVALID');
+    });
+
+    it('reports every imported feature with its outcome', async () => {
+      const lines = await report(problemCase);
+      expect(lines[0]).toContain('legacy_ref');
+      expect(lines.filter((l) => /^"\d+"/.test(l))).toHaveLength(8);
+      expect(lines.at(-1)).toContain('8 feature(s) imported');
+    });
+
+    it('lets only the GIS officer quarantine features, with a reason', async () => {
+      expect((await as('proc.mo').post(`/api/cases/${problemCase}/features/1/exclusion`, { excluded: true, reason: 'Duplicate reference' })).status).toBe(403);
+      expect((await as('gis.mo').post(`/api/cases/${problemCase}/features/1/exclusion`, { excluded: true })).status).toBe(400);
+      for (const [index, reason] of [[1, 'Duplicate reference; to be resolved with the register custodian'], [2, 'Duplicate reference; to be resolved with the register custodian'],
+        [3, 'Category not recognised under the Land Rights Act'], [4, 'Self-intersecting boundary; needs re-digitising'], [7, 'No legacy reference on the source sheet']] as const) {
+        expect((await as('gis.mo').post(`/api/cases/${problemCase}/features/${index}/exclusion`, { excluded: true, reason })).status).toBe(200);
+      }
+    });
+
+    it('publishes the remaining features as documented, not registered, records', async () => {
+      const result = await submit(problemCase);
+      expect(result.status).toBe('under_review');
+      expect(codes(result)).toEqual(['MIGRATION_INTERNAL_OVERLAP']);
+      await acknowledgeAll(problemCase);
+      expect((await approve(problemCase)).status).toBe(200);
+      const pub = await as('reg.mo').post(`/api/cases/${problemCase}/publish`);
+      expect(pub.status).toBe(200);
+      expect(pub.body.upi).toBe('3 migrated parcel(s)');
+
+      const lines = await report(problemCase);
+      expect(lines.at(-1)).toMatch(/3 published, 5 excluded/);
+      const first = (await caseDetail(problemCase)).staged.features[0];
+      const parcel = (await as('reg.mo').get(`/api/parcels/${first.published_upi}`)).body;
+      expect(parcel.parcel.legacy_ref).toBe('LR-MO-1990-0001');
+      expect(parcel.cases.map((c: any) => c.case_type)).toEqual(['migration']);
+      expect(parcel.currentRights).toEqual([expect.objectContaining({ party_name: 'Clean Record Legacyname', interest_status: 'documented', identity_status: 'unverified' })]);
+      const publicRecord = await request(app).get(`/api/public/parcels/${first.published_upi}`);
+      expect(publicRecord.body.properties.record_status).toBe('recorded, interests not yet verified');
+    });
+
+    it('migrates a clean register batch and records holders as stated', async () => {
+      const id = await openMigration('legacy_register_mo_4326.geojson');
+      const result = await submit(id);
+      expect(result.findings.filter((f) => f.severity === 'error')).toEqual([]);
+      await acknowledgeAll(id);
+      expect((await approve(id)).status).toBe(200);
+      expect((await as('reg.mo').post(`/api/cases/${id}/publish`)).body.upi).toBe('10 migrated parcel(s)');
+
+      const { rows } = await pool.query(
+        `SELECT p.legacy_ref, r.rrr_type, r.interest_status, r.share_num, pa.party_type, pa.origin
+           FROM lais.parcel p JOIN lais.rrr r ON r.parcel_id = p.id JOIN lais.party pa ON pa.id = r.party_id
+          WHERE p.legacy_ref IN ('LR-MO-1987-0002', 'LR-MO-1987-0003') ORDER BY p.legacy_ref, pa.name`,
+      );
+      expect(rows).toEqual([
+        { legacy_ref: 'LR-MO-1987-0002', rrr_type: 'co_ownership', interest_status: 'documented', share_num: null, party_type: 'person', origin: 'migration' },
+        { legacy_ref: 'LR-MO-1987-0002', rrr_type: 'co_ownership', interest_status: 'documented', share_num: null, party_type: 'person', origin: 'migration' },
+        { legacy_ref: 'LR-MO-1987-0003', rrr_type: 'customary_tenure', interest_status: 'documented', share_num: null, party_type: 'community', origin: 'migration' },
+      ]);
+    });
+
+    it('can be re-run safely: already-migrated records are refused', async () => {
+      const id = await openMigration('legacy_register_mo_4326.geojson');
+      const result = await submit(id);
+      expect(result.status).toBe('returned');
+      expect(codes(result).filter((c) => c === 'ALREADY_MIGRATED')).toHaveLength(10);
+    });
+  });
+
   describe('documents and separation of duties', () => {
     it('stops an uploader verifying their own document', async () => {
       const created = await as('proc.mo').post('/api/cases', { caseType: 'transfer', parcelUpi: 'PROV-MO-000010' });

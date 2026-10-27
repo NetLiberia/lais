@@ -34,6 +34,7 @@ export const FEATURE_LIMITS: Record<string, { min: number; max: number; label: s
   subdivision: { min: 2, max: 50, label: 'A subdivision takes between 2 and 50 new parcel features' },
   consolidation: { min: 1, max: 1, label: 'A consolidation takes exactly one merged parcel feature' },
   correction: { min: 1, max: 1, label: 'A correction takes exactly one corrected parcel feature' },
+  migration: { min: 1, max: 1000, label: 'A migration batch takes between 1 and 1000 legacy parcel features' },
 };
 
 /**

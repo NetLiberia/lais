@@ -6,6 +6,7 @@ import { setStatus, type CaseRow } from './cases.js';
 import { computeSnapshot } from './snapshot.js';
 import { evaluateCase, findingKey, persistRun, type Finding } from './validation.js';
 import { OWNERSHIP_TYPES } from './shares.js';
+import { parseLegacyProperties } from './legacy.js';
 
 export type PublishOutcome =
   | { published: true; parcelId: string | null; upi: string }
@@ -43,10 +44,10 @@ export async function publishApprovedCase(
   const acknowledged = new Set<string>();
   if (approval.validation_run_id) {
     const { rows } = await client.query(
-      `SELECT code, related_parcel_id, related_case_id FROM staging.finding WHERE run_id = $1 AND acknowledged_by IS NOT NULL`,
+      `SELECT code, related_parcel_id, related_case_id, feature_index FROM staging.finding WHERE run_id = $1 AND acknowledged_by IS NOT NULL`,
       [approval.validation_run_id],
     );
-    for (const r of rows) acknowledged.add(findingKey({ code: r.code, relatedParcelId: r.related_parcel_id, relatedCaseId: r.related_case_id }));
+    for (const r of rows) acknowledged.add(findingKey({ code: r.code, relatedParcelId: r.related_parcel_id, relatedCaseId: r.related_case_id, featureIndex: r.feature_index }));
   }
   const errors = evaluation.findings.filter((f) => f.severity === 'error');
   const newWarnings = evaluation.findings.filter((f) => f.severity === 'warning' && !acknowledged.has(findingKey(f)));
@@ -73,7 +74,9 @@ export async function publishApprovedCase(
       ? await publishTransfer(client, cs)
       : cs.case_type === 'correction'
         ? await publishCorrection(client, cs)
-        : await publishReshape(client, cs);
+        : cs.case_type === 'migration'
+          ? await publishMigration(client, cs)
+          : await publishReshape(client, cs);
 
   if (opts.simulateFailure) {
     // Test hook for the data-integrity evaluation: everything above must roll back.
@@ -186,6 +189,57 @@ async function publishCorrection(client: pg.PoolClient, cs: CaseRow): Promise<Pu
   await client.query('UPDATE lais.parcel SET current_version_id = $2 WHERE id = $1', [parcel.id, version.id]);
   if (feature) await client.query(`UPDATE staging.batch SET status = 'published' WHERE case_id = $1 AND status = 'active'`, [cs.id]);
   return { parcelId: parcel.id, upi: `${parcel.upi} (version ${parcel.version_no + 1})` };
+}
+
+/**
+ * Migration: every included feature becomes a parcel with a new provisional identifier and its legacy
+ * reference. Holders named in the legacy record become new, unverified parties with 'documented'
+ * interests; nobody is matched to an existing party automatically, and no interest is 'registered'.
+ */
+async function publishMigration(client: pg.PoolClient, cs: CaseRow): Promise<Published> {
+  const { rows: features } = await client.query(
+    `SELECT f.id, f.feature_index, f.properties FROM staging.batch b JOIN staging.feature f ON f.batch_id = b.id
+      WHERE b.case_id = $1 AND b.status = 'active' AND NOT f.excluded AND f.structural_ok
+      ORDER BY f.feature_index`,
+    [cs.id],
+  );
+  let count = 0;
+  for (const f of features) {
+    const record = parseLegacyProperties(f.properties);
+    if (record.problems.length > 0) throw new Error(`Feature ${f.feature_index + 1} has attribute problems; validation should have blocked publication`);
+    const upi = await nextProvisionalUpi(client, cs.county_id);
+    const { rows: [parcel] } = await client.query(
+      'INSERT INTO lais.parcel (upi, county_id, legacy_ref) VALUES ($1, $2, $3) RETURNING id',
+      [upi, cs.county_id, record.legacyRef],
+    );
+    const { rows: [version] } = await client.query(
+      `INSERT INTO lais.parcel_version
+         (parcel_id, version_no, geom, area_m2_calculated, area_method, area_m2_surveyed, land_category, land_use, source_reference, published_by_case)
+       SELECT $1, 1, f.geom, round(ST_Area(f.geom::geography)::numeric, 2), $2, $3, $4, $5, $6, $7
+         FROM staging.feature f WHERE f.id = $8
+       RETURNING id`,
+      [parcel.id, AREA_METHOD, record.surveyedAreaM2, record.landCategory, record.landUse,
+        `${cs.source_reference} / ${record.legacyRef}`, cs.id, f.id],
+    );
+    await client.query('UPDATE lais.parcel SET current_version_id = $2 WHERE id = $1', [parcel.id, version.id]);
+
+    const rrrType = record.holderType === 'community' ? 'customary_tenure' : record.holders.length > 1 ? 'co_ownership' : 'ownership';
+    for (const name of record.holders) {
+      const { rows: [party] } = await client.query(
+        `INSERT INTO lais.party (party_type, name, origin) VALUES ($1, $2, 'migration') RETURNING id`,
+        [record.holderType, name],
+      );
+      // Shares are left unknown: the legacy record did not state them and the system will not invent them.
+      await client.query(
+        `INSERT INTO lais.rrr (parcel_id, party_id, rrr_type, interest_status, created_by_case) VALUES ($1, $2, $3, 'documented', $4)`,
+        [parcel.id, party.id, rrrType, cs.id],
+      );
+    }
+    await client.query('UPDATE staging.feature SET published_parcel_id = $2 WHERE id = $1', [f.id, parcel.id]);
+    count += 1;
+  }
+  await client.query(`UPDATE staging.batch SET status = 'published' WHERE case_id = $1 AND status = 'active'`, [cs.id]);
+  return { parcelId: null, upi: `${count} migrated parcel(s)` };
 }
 
 /**

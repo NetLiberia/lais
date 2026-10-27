@@ -37,7 +37,10 @@ export function ParcelRecord() {
       <div className="page-head">
         <div>
           <h1>{data.parcel.upi} <span className={`pill p-${data.parcel.status}`}>{data.parcel.status}</span></h1>
-          <p className="muted">{data.parcel.county.name} · {human(shown?.land_category)} · {shown?.land_use ?? '—'}</p>
+          <p className="muted">
+            {data.parcel.county.name} · {human(shown?.land_category)} · {shown?.land_use ?? '—'}
+            {data.parcel.legacy_ref && <> · legacy reference <strong>{data.parcel.legacy_ref}</strong></>}
+          </p>
         </div>
       </div>
       <ErrorBox error={action.error} />
@@ -50,7 +53,7 @@ export function ParcelRecord() {
       )}
       <div className="grid-2">
         <div className="stack">
-          <Section title="Registered interests (current)">
+          <Section title="Current interests">
             <table className="table">
               <thead><tr><th>Holder</th><th>Interest</th><th>Share</th><th>Status</th><th>Since</th><th>Case</th></tr></thead>
               <tbody>
@@ -66,6 +69,11 @@ export function ParcelRecord() {
                 ))}
               </tbody>
             </table>
+            {data.currentRights.some((r: any) => r.interest_status !== 'registered') && (
+              <div className="alert info small">
+                Interests marked <strong>documented</strong> are names copied from a legacy record. They have not been verified or registered.
+              </div>
+            )}
             <p className="small muted">This is the record held by LAIS. A record match is not by itself a legal determination of ownership.</p>
           </Section>
           {data.historicalRights.length > 0 && (

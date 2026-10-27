@@ -4,6 +4,7 @@ import { hashPassword, verifyPassword } from '../../src/auth/password.js';
 import { open, seal } from '../../src/auth/secretBox.js';
 import { extractFeatures, extractSingleFeature, FEATURE_LIMITS, parseCrsMember } from '../../src/services/geojson.js';
 import { sharesSumToWhole } from '../../src/services/shares.js';
+import { parseLegacyProperties } from '../../src/services/legacy.js';
 import { detectDocumentType } from '../../src/services/files.js';
 
 describe('TOTP (RFC 6238 / RFC 4226 test vectors)', () => {
@@ -77,6 +78,19 @@ describe('GeoJSON intake', () => {
 
   it('rejects non-JSON', () => {
     expect(() => extractSingleFeature('not json', 4326)).toThrow(/valid JSON/);
+  });
+});
+
+describe('legacy record attributes', () => {
+  it('accepts a complete record and normalises it', () => {
+    const r = parseLegacyProperties({ legacy_ref: ' LR-1 ', land_category: 'Private', surveyed_area_m2: '7800.456', holder_names: 'A Name; B Name ;', holder_type: 'Person' });
+    expect(r).toMatchObject({ legacyRef: 'LR-1', landCategory: 'private', surveyedAreaM2: 7800.46, holders: ['A Name', 'B Name'], holderType: 'person', problems: [] });
+  });
+
+  it('reports every problem instead of guessing', () => {
+    const r = parseLegacyProperties({ land_category: 'freehold', surveyed_area_m2: '-5', holder_type: 'company' });
+    expect(r.problems).toHaveLength(4);
+    expect(r.landCategory).toBeNull();
   });
 });
 

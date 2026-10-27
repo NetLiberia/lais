@@ -44,6 +44,7 @@ parcelsRouter.get('/:upi', async (req, res) => {
       `SELECT id, case_no, case_type, status, created_at, updated_at FROM lais.land_case
         WHERE parcel_id = $1 OR id IN (SELECT case_id FROM lais.case_source_parcel WHERE parcel_id = $1)
            OR id IN (SELECT case_id FROM lais.parcel_lineage WHERE child_parcel_id = $1)
+           OR id IN (SELECT published_by_case FROM lais.parcel_version WHERE parcel_id = $1)
         ORDER BY created_at DESC`,
       [parcel.id],
     ),

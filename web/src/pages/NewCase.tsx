@@ -4,7 +4,7 @@ import { api } from '../api';
 import { useAuth } from '../auth';
 import { ErrorBox, useAction } from '../components/ui';
 
-type CaseType = 'first_registration' | 'transfer' | 'subdivision' | 'consolidation' | 'correction';
+type CaseType = 'first_registration' | 'transfer' | 'subdivision' | 'consolidation' | 'correction' | 'migration';
 
 const TYPES: { value: CaseType; label: string; hint: string }[] = [
   { value: 'first_registration', label: 'First registration', hint: 'Record a parcel that is not yet in the register.' },
@@ -12,6 +12,7 @@ const TYPES: { value: CaseType; label: string; hint: string }[] = [
   { value: 'subdivision', label: 'Subdivision', hint: 'Split one published parcel into two or more new parcels.' },
   { value: 'consolidation', label: 'Consolidation', hint: 'Merge two or more published parcels into one.' },
   { value: 'correction', label: 'Correction', hint: 'Fix an error in a published boundary or record. Rights are not changed.' },
+  { value: 'migration', label: 'Legacy migration', hint: 'Bring a batch of parcels from an existing register or GIS layer into LAIS.' },
 ];
 
 /** Splits a list of identifiers typed with commas, spaces or new lines. */
@@ -40,7 +41,9 @@ export function NewCase() {
     e.preventDefault();
     const reference = sourceReference || undefined;
     const body =
-      caseType === 'first_registration'
+      caseType === 'migration'
+        ? { caseType, countyId, sourceReference: reference }
+        : caseType === 'first_registration'
         ? { caseType, countyId, landCategory, landUse: landUse || undefined, sourceReference: reference, proposedUpi: proposedUpi.trim() || undefined }
         : caseType === 'consolidation'
           ? { caseType, parcelUpis: parseUpis(parcelUpis), sourceReference: reference }
@@ -65,13 +68,22 @@ export function NewCase() {
           ))}
         </fieldset>
 
+        {(caseType === 'first_registration' || caseType === 'migration') && (
+          <label>County (your assigned jurisdictions)
+            <select value={countyId} onChange={(e) => setCountyId(Number(e.target.value))}>
+              {uniqueCounties.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </label>
+        )}
+        {caseType === 'migration' && (
+          <p className="small muted">
+            Each feature in the GeoJSON file needs <code>legacy_ref</code> and <code>land_category</code>; it may also have <code>land_use</code>,
+            {' '}<code>surveyed_area_m2</code>, <code>holder_names</code> (separated by ";") and <code>holder_type</code>.
+            Holders become documented interests to be verified later, not registered ones.
+          </p>
+        )}
         {caseType === 'first_registration' && (
           <>
-            <label>County (your assigned jurisdictions)
-              <select value={countyId} onChange={(e) => setCountyId(Number(e.target.value))}>
-                {uniqueCounties.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </label>
             <label>Land category (Land Rights Act 2018 categories)
               <select value={landCategory} onChange={(e) => setLandCategory(e.target.value)}>
                 <option value="private">Private</option>
@@ -105,7 +117,9 @@ export function NewCase() {
             <p className="small muted">The case starts with the current record. Change only what is wrong; the published version is kept in the history.</p>
           </>
         ) : (
-          <label>Survey / source record reference<input value={sourceReference} onChange={(e) => setSourceReference(e.target.value)} /></label>
+          <label>{caseType === 'migration' ? 'Legacy register or dataset name' : 'Survey / source record reference'}
+            <input value={sourceReference} onChange={(e) => setSourceReference(e.target.value)} />
+          </label>
         )}
         <ErrorBox error={error} />
         <button type="submit" disabled={busy}>Create draft case</button>

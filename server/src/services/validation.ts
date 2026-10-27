@@ -3,6 +3,7 @@ import type { Db } from '../db.js';
 import { OPEN_STATUSES } from '../authz/workflow.js';
 import type { CaseRow } from './cases.js';
 import { OWNERSHIP_TYPES, sharesSumToWhole } from './shares.js';
+import { parseLegacyProperties } from './legacy.js';
 
 /**
  * Validation and spatial conflict detection.
@@ -19,6 +20,8 @@ export interface Finding {
   message: string;
   relatedParcelId?: string | null;
   relatedCaseId?: string | null;
+  /** For multi-feature batches: which imported feature (0-based) the finding is about. */
+  featureIndex?: number | null;
   detail?: Record<string, unknown>;
 }
 
@@ -40,11 +43,13 @@ export async function evaluateCase(db: Db, cs: CaseRow): Promise<Evaluation> {
     landCategory = await transferChecks(db, cs, findings);
   } else if (cs.case_type === 'correction') {
     batchId = await correctionChecks(db, cs, findings);
+  } else if (cs.case_type === 'migration') {
+    batchId = await migrationChecks(db, cs, findings);
   } else {
     batchId = await reshapeChecks(db, cs, findings);
   }
-  // A correction never changes rights, so there are no proposals to check.
-  if (cs.case_type !== 'correction') await rightsChecks(db, cs, landCategory, findings);
+  // A correction never changes rights, and a migration records legacy holders as documented interests.
+  if (cs.case_type !== 'correction' && cs.case_type !== 'migration') await rightsChecks(db, cs, landCategory, findings);
   await documentChecks(db, cs, findings, batchId !== null);
   return { findings, batchId };
 }
@@ -120,13 +125,15 @@ interface StagedFeature {
   structural_ok: boolean;
   structural_message: string | null;
   batch_id: string;
+  properties: Record<string, unknown>;
 }
 
+/** The active batch's features, leaving out any a GIS officer has quarantined. */
 async function stagedFeatures(db: Db, caseId: string): Promise<StagedFeature[]> {
   const { rows } = await db.query<StagedFeature>(
-    `SELECT f.id, f.feature_index, f.structural_ok, f.structural_message, b.id AS batch_id
+    `SELECT f.id, f.feature_index, f.structural_ok, f.structural_message, b.id AS batch_id, f.properties
        FROM staging.batch b JOIN staging.feature f ON f.batch_id = b.id
-      WHERE b.case_id = $1 AND b.status = 'active'
+      WHERE b.case_id = $1 AND b.status = 'active' AND NOT f.excluded
       ORDER BY f.feature_index`,
     [caseId],
   );
@@ -330,6 +337,80 @@ async function transferChecks(db: Db, cs: CaseRow, out: Finding[]): Promise<stri
   return parcel.land_category;
 }
 
+/**
+ * Migration of legacy records. Each included feature must have valid legacy attributes and geometry;
+ * problem features can be fixed and re-imported, or excluded (quarantined) with a reason.
+ */
+async function migrationChecks(db: Db, cs: CaseRow, out: Finding[]): Promise<string | null> {
+  if (!cs.source_reference?.trim()) {
+    out.push(err('SOURCE_REFERENCE_MISSING', 'Name the legacy register or dataset this batch comes from'));
+  }
+  const { rows: [batch] } = await db.query(`SELECT id FROM staging.batch WHERE case_id = $1 AND status = 'active'`, [cs.id]);
+  if (!batch) {
+    out.push(err('NO_GEOMETRY', 'Import the legacy parcels as a GeoJSON file'));
+    return null;
+  }
+  const features = await stagedFeatures(db, cs.id);
+  if (features.length === 0) {
+    out.push(err('NOTHING_TO_MIGRATE', 'Every feature in the batch has been excluded'));
+    return batch.id;
+  }
+
+  const labelFor = (f: StagedFeature, ref: string | null) => `Feature ${f.feature_index + 1}${ref ? ` (${ref})` : ''}: `;
+  const byRef = new Map<string, StagedFeature[]>();
+  for (const f of features) {
+    const record = parseLegacyProperties(f.properties);
+    for (const problem of record.problems) {
+      out.push(err('LEGACY_ATTRIBUTE_INVALID', `${labelFor(f, record.legacyRef)}${problem}`, { featureIndex: f.feature_index }));
+    }
+    if (record.legacyRef) byRef.set(record.legacyRef, [...(byRef.get(record.legacyRef) ?? []), f]);
+  }
+  for (const [ref, group] of byRef) {
+    if (group.length < 2) continue;
+    for (const f of group) {
+      const others = group.filter((g) => g !== f).map((g) => g.feature_index + 1).join(', ');
+      out.push(err('DUPLICATE_LEGACY_REF', `${labelFor(f, ref)}the same legacy_ref is used by feature(s) ${others}`, { featureIndex: f.feature_index }));
+    }
+  }
+  const { rows: migrated } = await db.query(
+    'SELECT legacy_ref, upi, id FROM lais.parcel WHERE county_id = $1 AND legacy_ref = ANY($2)',
+    [cs.county_id, [...byRef.keys()]],
+  );
+  for (const m of migrated) {
+    for (const f of byRef.get(m.legacy_ref) ?? []) {
+      out.push(err('ALREADY_MIGRATED', `${labelFor(f, m.legacy_ref)}already migrated as ${m.upi}`, { featureIndex: f.feature_index, relatedParcelId: m.id }));
+    }
+  }
+
+  for (const f of features) {
+    const label = labelFor(f, parseLegacyProperties(f.properties).legacyRef);
+    if (!f.structural_ok) {
+      out.push(err('GEOMETRY_INVALID', `${label}The imported geometry is invalid: ${f.structural_message}. The system does not repair geometries; fix it in the GIS tool or exclude the feature.`, { featureIndex: f.feature_index }));
+      continue;
+    }
+    const before = out.length;
+    await featureChecks(db, cs, f, label, [], out);
+    for (const finding of out.slice(before)) finding.featureIndex = f.feature_index;
+  }
+
+  // Legacy datasets often overlap themselves. Flag it for the registrar rather than deciding it.
+  const { rows: overlaps } = await db.query(
+    `SELECT a.feature_index AS a, b.feature_index AS b, ST_Area(ST_Intersection(a.geom, b.geom)::geography) AS overlap_m2
+       FROM staging.feature a JOIN staging.feature b
+         ON a.batch_id = b.batch_id AND a.feature_index < b.feature_index AND NOT a.excluded AND NOT b.excluded
+      WHERE a.batch_id = $1 AND a.geom IS NOT NULL AND b.geom IS NOT NULL AND ST_Intersects(a.geom, b.geom)`,
+    [batch.id],
+  );
+  for (const o of overlaps) {
+    if (o.overlap_m2 > config.overlapToleranceM2) {
+      out.push(warn('MIGRATION_INTERNAL_OVERLAP', `Features ${o.a + 1} and ${o.b + 1} in this batch overlap by ${Number(o.overlap_m2).toFixed(2)} m²`, {
+        featureIndex: o.a, detail: { otherFeature: o.b, overlap_m2: Number(o.overlap_m2) },
+      }));
+    }
+  }
+  return batch.id;
+}
+
 /** Subdivision and consolidation: the new parcels must exactly replace the old ones. */
 async function reshapeChecks(db: Db, cs: CaseRow, out: Finding[]): Promise<string | null> {
   if (!cs.land_category) out.push(err('LAND_CATEGORY_MISSING', 'A land category for the new parcel(s) is required'));
@@ -505,6 +586,10 @@ async function documentChecks(db: Db, cs: CaseRow, out: Finding[], hasGeometry: 
     }
   } else if (cs.case_type === 'transfer') {
     if (!verified('deed')) out.push(err('MISSING_TRANSFER_DEED', 'A verified transfer deed is required'));
+  } else if (cs.case_type === 'migration') {
+    if (!docs.some((d) => d.verification_status === 'verified')) {
+      out.push(err('MISSING_MIGRATION_SOURCE', 'Attach and verify the source of the batch (register extract, dataset description or migration authorization)'));
+    }
   } else if (cs.case_type === 'correction') {
     if (hasGeometry && !verified('survey_plan')) {
       out.push(err('MISSING_SURVEY_PLAN', 'A boundary correction needs a verified survey plan'));
@@ -532,9 +617,9 @@ export async function persistRun(
   );
   for (const f of evaluation.findings) {
     await db.query(
-      `INSERT INTO staging.finding (run_id, code, severity, message, related_parcel_id, related_case_id, detail)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [run.id, f.code, f.severity, f.message, f.relatedParcelId ?? null, f.relatedCaseId ?? null, JSON.stringify(f.detail ?? {})],
+      `INSERT INTO staging.finding (run_id, code, severity, message, related_parcel_id, related_case_id, feature_index, detail)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [run.id, f.code, f.severity, f.message, f.relatedParcelId ?? null, f.relatedCaseId ?? null, f.featureIndex ?? null, JSON.stringify(f.detail ?? {})],
     );
   }
   return run.id;
@@ -556,5 +641,5 @@ export async function latestRun(db: Db, caseId: string) {
 }
 
 /** Key used to match a fresh finding against one acknowledged earlier. */
-export const findingKey = (f: { code: string; relatedParcelId?: string | null; relatedCaseId?: string | null }) =>
-  `${f.code}|${f.relatedParcelId ?? ''}|${f.relatedCaseId ?? ''}`;
+export const findingKey = (f: { code: string; relatedParcelId?: string | null; relatedCaseId?: string | null; featureIndex?: number | null }) =>
+  `${f.code}|${f.relatedParcelId ?? ''}|${f.relatedCaseId ?? ''}|${f.featureIndex ?? ''}`;

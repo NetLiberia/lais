@@ -10,7 +10,7 @@ import type { CaseRow } from './cases.js';
  */
 export async function computeSnapshot(db: Db, cs: CaseRow): Promise<string> {
   const geometry = await db.query(
-    `SELECT f.id, encode(sha256(ST_AsEWKB(f.geom_input)), 'hex') AS geom_hash
+    `SELECT f.id, encode(sha256(ST_AsEWKB(f.geom_input)), 'hex') AS geom_hash, md5(f.properties::text) AS properties_hash, f.excluded
        FROM staging.batch b JOIN staging.feature f ON f.batch_id = b.id
       WHERE b.case_id = $1 AND b.status = 'active' ORDER BY f.feature_index`,
     [cs.id],

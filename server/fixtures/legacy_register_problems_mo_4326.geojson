@@ -1,0 +1,286 @@
+{
+ "type": "FeatureCollection",
+ "name": "SYNTHETIC legacy extract with typical faults (all fictional)",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1990-0001",
+    "land_category": "private",
+    "holder_names": "Clean Record Legacyname",
+    "note": "expected: ok"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.68,
+       6.305
+      ],
+      [
+       -10.6792,
+       6.305
+      ],
+      [
+       -10.6792,
+       6.3058
+      ],
+      [
+       -10.68,
+       6.3058
+      ],
+      [
+       -10.68,
+       6.305
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1990-0002",
+    "land_category": "private",
+    "note": "expected: DUPLICATE_LEGACY_REF"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.679,
+       6.305
+      ],
+      [
+       -10.6782,
+       6.305
+      ],
+      [
+       -10.6782,
+       6.3058
+      ],
+      [
+       -10.679,
+       6.3058
+      ],
+      [
+       -10.679,
+       6.305
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1990-0002",
+    "land_category": "private",
+    "note": "expected: DUPLICATE_LEGACY_REF"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.678,
+       6.305
+      ],
+      [
+       -10.6772,
+       6.305
+      ],
+      [
+       -10.6772,
+       6.3058
+      ],
+      [
+       -10.678,
+       6.3058
+      ],
+      [
+       -10.678,
+       6.305
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1990-0004",
+    "land_category": "freehold",
+    "note": "expected: LEGACY_ATTRIBUTE_INVALID (category)"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.677,
+       6.305
+      ],
+      [
+       -10.6762,
+       6.305
+      ],
+      [
+       -10.6762,
+       6.3058
+      ],
+      [
+       -10.677,
+       6.3058
+      ],
+      [
+       -10.677,
+       6.305
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1990-0005",
+    "land_category": "private",
+    "note": "expected: GEOMETRY_INVALID"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.676,
+       6.305
+      ],
+      [
+       -10.6752,
+       6.3058
+      ],
+      [
+       -10.6752,
+       6.305
+      ],
+      [
+       -10.676,
+       6.3058
+      ],
+      [
+       -10.676,
+       6.305
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1990-0006",
+    "land_category": "private",
+    "note": "expected: MIGRATION_INTERNAL_OVERLAP with 7"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.68,
+       6.306
+      ],
+      [
+       -10.6792,
+       6.306
+      ],
+      [
+       -10.6792,
+       6.3068
+      ],
+      [
+       -10.68,
+       6.3068
+      ],
+      [
+       -10.68,
+       6.306
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1990-0007",
+    "land_category": "private",
+    "note": "expected: MIGRATION_INTERNAL_OVERLAP with 6"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.6796,
+       6.3064
+      ],
+      [
+       -10.6788,
+       6.3064
+      ],
+      [
+       -10.6788,
+       6.3072
+      ],
+      [
+       -10.6796,
+       6.3072
+      ],
+      [
+       -10.6796,
+       6.3064
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "land_category": "private",
+    "note": "expected: LEGACY_ATTRIBUTE_INVALID (no legacy_ref)"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.678,
+       6.306
+      ],
+      [
+       -10.6772,
+       6.306
+      ],
+      [
+       -10.6772,
+       6.3068
+      ],
+      [
+       -10.678,
+       6.3068
+      ],
+      [
+       -10.678,
+       6.306
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

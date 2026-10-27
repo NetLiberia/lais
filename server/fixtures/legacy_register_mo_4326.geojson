@@ -1,0 +1,386 @@
+{
+ "type": "FeatureCollection",
+ "name": "SYNTHETIC legacy register extract, 10 parcels (all fictional)",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1987-0001",
+    "land_category": "private",
+    "land_use": "residential",
+    "surveyed_area_m2": 7800,
+    "holder_names": "Esther Legacyname",
+    "holder_type": "person"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.68,
+       6.32
+      ],
+      [
+       -10.6792,
+       6.32
+      ],
+      [
+       -10.6792,
+       6.3208
+      ],
+      [
+       -10.68,
+       6.3208
+      ],
+      [
+       -10.68,
+       6.32
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1987-0002",
+    "land_category": "private",
+    "land_use": "residential",
+    "surveyed_area_m2": null,
+    "holder_names": "Abraham Legacyname; Ruth Legacyname",
+    "holder_type": "person"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.679,
+       6.32
+      ],
+      [
+       -10.6782,
+       6.32
+      ],
+      [
+       -10.6782,
+       6.3208
+      ],
+      [
+       -10.679,
+       6.3208
+      ],
+      [
+       -10.679,
+       6.32
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1987-0003",
+    "land_category": "customary",
+    "land_use": "agricultural",
+    "surveyed_area_m2": null,
+    "holder_names": "Sample Clan of Area 7 (legacy)",
+    "holder_type": "community"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.678,
+       6.32
+      ],
+      [
+       -10.6772,
+       6.32
+      ],
+      [
+       -10.6772,
+       6.3208
+      ],
+      [
+       -10.678,
+       6.3208
+      ],
+      [
+       -10.678,
+       6.32
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1987-0004",
+    "land_category": "government",
+    "land_use": "institutional",
+    "surveyed_area_m2": 7800,
+    "holder_names": "Example Agency (legacy)",
+    "holder_type": "government"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.677,
+       6.32
+      ],
+      [
+       -10.6762,
+       6.32
+      ],
+      [
+       -10.6762,
+       6.3208
+      ],
+      [
+       -10.677,
+       6.3208
+      ],
+      [
+       -10.677,
+       6.32
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1987-0005",
+    "land_category": "public",
+    "land_use": "open space",
+    "surveyed_area_m2": null,
+    "holder_names": null,
+    "holder_type": null
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.676,
+       6.32
+      ],
+      [
+       -10.6752,
+       6.32
+      ],
+      [
+       -10.6752,
+       6.3208
+      ],
+      [
+       -10.676,
+       6.3208
+      ],
+      [
+       -10.676,
+       6.32
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1987-0006",
+    "land_category": "private",
+    "land_use": "commercial",
+    "surveyed_area_m2": null,
+    "holder_names": "Moses Legacyname",
+    "holder_type": "person"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.68,
+       6.321
+      ],
+      [
+       -10.6792,
+       6.321
+      ],
+      [
+       -10.6792,
+       6.3218
+      ],
+      [
+       -10.68,
+       6.3218
+      ],
+      [
+       -10.68,
+       6.321
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1987-0007",
+    "land_category": "private",
+    "land_use": "residential",
+    "surveyed_area_m2": 7800,
+    "holder_names": "Grace Legacyname",
+    "holder_type": "person"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.679,
+       6.321
+      ],
+      [
+       -10.6782,
+       6.321
+      ],
+      [
+       -10.6782,
+       6.3218
+      ],
+      [
+       -10.679,
+       6.3218
+      ],
+      [
+       -10.679,
+       6.321
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1987-0008",
+    "land_category": "private",
+    "land_use": "agricultural",
+    "surveyed_area_m2": null,
+    "holder_names": "Sample Farm Cooperative (legacy)",
+    "holder_type": "organization"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.678,
+       6.321
+      ],
+      [
+       -10.6772,
+       6.321
+      ],
+      [
+       -10.6772,
+       6.3218
+      ],
+      [
+       -10.678,
+       6.3218
+      ],
+      [
+       -10.678,
+       6.321
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1987-0009",
+    "land_category": "private",
+    "land_use": "residential",
+    "surveyed_area_m2": null,
+    "holder_names": "Peter Legacyname",
+    "holder_type": "person"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.677,
+       6.321
+      ],
+      [
+       -10.6762,
+       6.321
+      ],
+      [
+       -10.6762,
+       6.3218
+      ],
+      [
+       -10.677,
+       6.3218
+      ],
+      [
+       -10.677,
+       6.321
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "legacy_ref": "LR-MO-1987-0010",
+    "land_category": "private",
+    "land_use": "commercial",
+    "surveyed_area_m2": 7800,
+    "holder_names": "Mary Legacyname",
+    "holder_type": "person"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -10.676,
+       6.321
+      ],
+      [
+       -10.6752,
+       6.321
+      ],
+      [
+       -10.6752,
+       6.3218
+      ],
+      [
+       -10.676,
+       6.3218
+      ],
+      [
+       -10.676,
+       6.321
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}
