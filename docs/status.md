@@ -10,7 +10,7 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 | `npm test`: integration tests against a real PostgreSQL + PostGIS database, including 17 for supervision (scope, no legal authority, immutability, review, conflicts, tasks, dashboard figures, reports, escalations) | 110 passed |
 | `npm test`: web component tests (shared dialogs and tables, permission-aware navigation, account creation, URL filters, supervisor dashboard empty and error states, return dialog, task moves) in jsdom | 24 passed |
 | `npm run lint` (ESLint with typescript-eslint and the React hooks rules) | 0 errors, 0 warnings. `any` is an error outside test files |
-| `npm run e2e`: browser walkthroughs in Microsoft Edge (8 scripts, including the supervisor journey) | 97 steps passed, 0 problems |
+| `npm run e2e`: browser walkthroughs in Microsoft Edge (8 scripts, including the supervisor journey) | 98 steps passed, 0 problems |
 | `npm run backup:verify` on a backup taken through the interface | Restored and verified (see [backup-restore.md](backup-restore.md)) |
 | `npm run typecheck`, `npm run build` | Clean |
 

@@ -310,7 +310,8 @@ casesRouter.get('/:id', async (req, res) => {
 
   // Supervisory quality review of the current validation run (shown to registrars and preparers).
   const { rows: [review] } = await pool.query(
-    `SELECT s.decision, s.created_at, s.validation_run_id, s.notes, u.username AS reviewer
+    `SELECT s.decision, s.created_at, s.validation_run_id, s.notes, u.username AS reviewer,
+            s.issue_categories, s.affected_features, s.instructions
        FROM lais.supervisory_review s JOIN lais.app_user u ON u.id = s.reviewer_id WHERE s.case_id = $1 ORDER BY s.created_at DESC LIMIT 1`,
     [cs.id],
   );

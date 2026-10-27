@@ -257,6 +257,26 @@ await check('the registrar sees the quality review on the case before deciding',
   await reg.context().close();
 });
 
+await check('when review is required, the registrar sees why approval is unavailable', async () => {
+  const admin = await signIn('admin');
+  expectStatus(await call(admin, 'PUT', '/admin/settings/workflow.supervisor_review', { value: 'required', reason: 'Walkthrough of the review gate' }), 200, 'set required');
+  const reg = await signIn('reg.mo');
+  try {
+    await reg.goto(`${BASE}/work/cases/${overlap.id}`);
+    await reg.getByRole('heading', { name: 'Supervisory quality review' }).waitFor();
+    await reg.getByText('Approval is unavailable until a supervisor accepts').waitFor();
+    if (!(await reg.getByRole('radio', { name: 'Approve' }).isDisabled())) throw new Error('Approve is selectable without a quality acceptance');
+    await shot(reg, 'registrar-review-gate');
+    await reg.goto(`${BASE}/work/cases/${clean.id}`);
+    await reg.getByText(/Quality accepted by sup\.mo/).waitFor();
+    if (await reg.getByRole('radio', { name: 'Approve' }).isDisabled()) throw new Error('Approve blocked although the submission was accepted');
+  } finally {
+    expectStatus(await call(admin, 'PUT', '/admin/settings/workflow.supervisor_review', { value: 'optional', reason: 'Back to the default' }), 200, 'reset optional');
+    await reg.context().close();
+    await admin.context().close();
+  }
+});
+
 await check('mobile: dashboard fits a phone', async () => {
   const phone = await signIn('sup.mo', { width: 390, height: 844 });
   await phone.getByRole('heading', { name: 'Supervisor Dashboard' }).waitFor();

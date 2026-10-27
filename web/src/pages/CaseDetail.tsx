@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, CASE_TYPE_LABELS, fmtDate, human } from '../api';
 import { ParcelMap, type Overlay } from '../components/ParcelMap';
@@ -105,8 +105,10 @@ export function CaseDetail() {
             <ParcelMap overlays={overlays} height={340} />
             {can('case.import_geometry') && <GeometryImport caseId={id!} act={act} />}
           </Section>
+          <QualityReview data={data} />
           <Validation data={data} act={act} caseId={id!} canValidate={can('case.validate')} canAcknowledge={can('case.acknowledge_finding')} />
-          <Actions act={act} caseId={id!} can={can} />
+          <Actions act={act} caseId={id!} can={can}
+            approveBlocked={data.qualityReview.mode === 'required' && data.qualityReview.applies && !data.qualityReview.acceptedForCurrentRun} />
         </div>
       </div>
 
@@ -471,8 +473,36 @@ function Validation({ data, act, caseId, canValidate, canAcknowledge }: { data: 
   );
 }
 
-function Actions({ act, caseId, can }: { act: Act; caseId: string; can: (a: string) => boolean }) {
-  const [decision, setDecision] = useState('approved');
+const REVIEW_LABELS = { accepted: 'Quality accepted', returned: 'Returned for correction', info_requested: 'Information requested' } as const;
+
+/** The supervisor's quality review: shown to everyone working on the case. It is not a legal decision. */
+function QualityReview({ data }: { data: CaseDetailResponse }) {
+  const q = data.qualityReview;
+  if (!q.applies && !q.latest) return null;
+  const r = q.latest;
+  return (
+    <Section title="Supervisory quality review">
+      {!r ? <p className="small muted">No supervisor has reviewed this case yet.</p> : (
+        <div className="small">
+          <p><strong>{REVIEW_LABELS[r.decision]}</strong> by {r.reviewer}, {fmtDate(r.created_at)}
+            {r.decision === 'accepted' && !q.acceptedForCurrentRun && <span className="danger"> (for an earlier submission)</span>}</p>
+          <p>{r.notes}</p>
+          {r.issue_categories.length > 0 && <p>Issues: {r.issue_categories.map((c) => c.replace(/_/g, ' ')).join(', ')}{r.affected_features.length > 0 && ` · records ${r.affected_features.map((i) => i + 1).join(', ')}`}</p>}
+          {r.instructions && <p><strong>Instructions:</strong> {r.instructions}</p>}
+        </div>
+      )}
+      <p className="small muted">
+        {q.mode === 'required' && q.applies
+          ? 'A supervisor must accept the current submission before the registrar can approve it.'
+          : 'Quality review is optional for this case.'} A quality review is an operational check, not a legal decision.
+      </p>
+    </Section>
+  );
+}
+
+function Actions({ act, caseId, can, approveBlocked }: { act: Act; caseId: string; can: (a: string) => boolean; approveBlocked: boolean }) {
+  const [decision, setDecision] = useState(approveBlocked ? 'returned' : 'approved');
+  useEffect(() => { if (approveBlocked && decision === 'approved') setDecision('returned'); }, [approveBlocked, decision]);
   const [reason, setReason] = useState('');
   const [authorityBasis, setAuthorityBasis] = useState('');
   const any = ['case.submit', 'case.withdraw', 'case.decide', 'case.publish'].some(can);
@@ -497,9 +527,10 @@ function Actions({ act, caseId, can }: { act: Act; caseId: string; can: (a: stri
             <strong>Record a decision</strong>
             <div className="row wrap">
               {['approved', 'returned', 'rejected'].map((d) => (
-                <label key={d} className="inline"><input type="radio" checked={decision === d} onChange={() => setDecision(d)} /> {d === 'approved' ? 'Approve' : d === 'returned' ? 'Return for correction' : 'Reject'}</label>
+                <label key={d} className="inline"><input type="radio" checked={decision === d} disabled={d === 'approved' && approveBlocked} onChange={() => setDecision(d)} /> {d === 'approved' ? 'Approve' : d === 'returned' ? 'Return for correction' : 'Reject'}</label>
               ))}
             </div>
+            {approveBlocked && <p className="small muted">Approval is unavailable until a supervisor accepts the quality of the current submission.</p>}
             <label>Reasons (recorded permanently)<textarea value={reason} onChange={(e) => setReason(e.target.value)} required minLength={5} /></label>
             {decision === 'approved' && (
               <label>Delegated authority relied on<input value={authorityBasis} onChange={(e) => setAuthorityBasis(e.target.value)} placeholder="e.g. delegation instrument reference" required /></label>

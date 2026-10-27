@@ -88,6 +88,16 @@ export interface CaseDetailResponse {
   validation: { run: ValidationRun; findings: Finding[] } | null;
   allowedActions: string[];
   separationNotice: string | null;
+  /** The latest supervisory quality review, and whether it covers the current validation run. */
+  qualityReview: {
+    mode: 'optional' | 'required';
+    applies: boolean;
+    latest: {
+      decision: 'accepted' | 'returned' | 'info_requested'; created_at: string; validation_run_id: string | null; notes: string; reviewer: string;
+      issue_categories: string[]; affected_features: number[]; instructions: string | null;
+    } | null;
+    acceptedForCurrentRun: boolean;
+  };
 }
 
 export interface PartySummary {

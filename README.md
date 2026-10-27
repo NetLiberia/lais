@@ -132,7 +132,7 @@ Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 154 tests in about 30 sec
 
 `npm run lint` runs ESLint over the API, the web app and the walkthroughs. API responses are typed in `web/src/types.ts`, and `any` is a lint error outside test files.
 
-**Browser walkthroughs.** With the API and web app running, `npm run e2e` drives Microsoft Edge through eight scripted journeys: registration, subdivision, document requests, corrections, legacy migration, confirmation, the administrator dashboard and the supervisor dashboard. It resets the development database before each one. Set `LAIS_WEB_URL` if the web app is not on port 5173, and `BROWSER_PATH` for another Chromium browser. Screenshots go to `e2e/shots/`. Last run: 97 steps, 0 problems.
+**Browser walkthroughs.** With the API and web app running, `npm run e2e` drives Microsoft Edge through eight scripted journeys: registration, subdivision, document requests, corrections, legacy migration, confirmation, the administrator dashboard and the supervisor dashboard. It resets the development database before each one. Set `LAIS_WEB_URL` if the web app is not on port 5173, and `BROWSER_PATH` for another Chromium browser. Screenshots go to `e2e/shots/`. Last run: 98 steps, 0 problems.
 
 **Backups.** `npm run backup:verify -w server -- <file>` restores a backup into `TEST_DATABASE_URL` and checks it (see [docs/backup-restore.md](docs/backup-restore.md)).
 
