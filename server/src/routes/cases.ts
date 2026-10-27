@@ -267,7 +267,7 @@ casesRouter.get('/:id', async (req, res) => {
             WHERE p.id = $1`,
           [cs.parcel_id],
         )
-      : Promise.resolve({ rows: [] as any[] }),
+      : Promise.resolve({ rows: [] as Record<string, unknown>[] }),
     pool.query(
       `SELECT d.id, d.decision, d.reason, d.authority_basis, d.snapshot_hash, d.decided_at, d.superseded_at, u.username AS decided_by
          FROM lais.case_decision d JOIN lais.app_user u ON u.id = d.decided_by

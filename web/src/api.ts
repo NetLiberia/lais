@@ -12,7 +12,7 @@ export class ApiError extends Error {
     public status: number,
     message: string,
     public details?: unknown,
-    public body?: any,
+    public body?: unknown,
   ) {
     super(message);
   }
@@ -20,7 +20,8 @@ export class ApiError extends Error {
 
 type Options = { method?: string; body?: unknown; form?: FormData };
 
-export async function api<T = any>(path: string, opts: Options = {}): Promise<T> {
+/** Calls the API. Pass the response type, e.g. `api<CaseDetailResponse>(...)`; untyped calls return `unknown`. */
+export async function api<T = unknown>(path: string, opts: Options = {}): Promise<T> {
   const method = opts.method ?? (opts.body !== undefined || opts.form ? 'POST' : 'GET');
   const headers: Record<string, string> = {};
   if (method !== 'GET' && csrfToken) headers['X-CSRF-Token'] = csrfToken;
@@ -36,7 +37,9 @@ export async function api<T = any>(path: string, opts: Options = {}): Promise<T>
   if (!res.ok) {
     const details = data?.details;
     let message = typeof data?.error === 'string' ? data.error : `Request failed (${res.status})`;
-    if (Array.isArray(details) && details[0]?.message) message += `: ${details.map((d: any) => `${d.path ? `${d.path} ` : ''}${d.message}`).join('; ')}`;
+    if (Array.isArray(details) && details[0]?.message) {
+      message += `: ${(details as { path?: string; message: string }[]).map((d) => `${d.path ? `${d.path} ` : ''}${d.message}`).join('; ')}`;
+    }
     throw new ApiError(res.status, message, details, data);
   }
   return data as T;

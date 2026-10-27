@@ -36,8 +36,16 @@ documentRequestsRouter.get('/', async (req, res) => {
   res.json(rows);
 });
 
-async function loadRequest(db: Db, id: string, lock = false) {
-  const { rows: [request] } = await db.query(
+/** A row of lais.document_request. */
+interface DocumentRequestRecord {
+  id: string; request_no: string; requested_by: string; party_id: string; parcel_id: string; county_id: number;
+  document_types: string[]; purpose: string; status: string; prepared_by: string | null; prepared_at: Date | null;
+  preparation_note: string | null; decided_by: string | null; decided_at: Date | null; decision_reason: string | null;
+  release_expires_at: Date | null; created_at: Date; updated_at: Date;
+}
+
+async function loadRequest(db: Db, id: string, lock = false): Promise<DocumentRequestRecord> {
+  const { rows: [request] } = await db.query<DocumentRequestRecord>(
     `SELECT * FROM lais.document_request WHERE id = $1 ${lock ? 'FOR UPDATE' : ''}`,
     [id],
   );
@@ -98,7 +106,7 @@ const prepareBody = z.object({
 });
 
 /** Runs fn with the request locked, after checking the caller may act on it in its current state. */
-async function inRequestTx<T>(req: Request, action: 'docrequest.prepare' | 'docrequest.decide', status: string, fn: (client: pg.PoolClient, request: any) => Promise<T>) {
+async function inRequestTx<T>(req: Request, action: 'docrequest.prepare' | 'docrequest.decide', status: string, fn: (client: pg.PoolClient, request: DocumentRequestRecord) => Promise<T>) {
   const id = parseId(req.params.id);
   return tx(async (client) => {
     const request = await loadRequest(client, id, true);

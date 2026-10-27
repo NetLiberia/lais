@@ -236,6 +236,19 @@ await check('document categories: add a category', async () => {
   await admin.locator('tbody tr', { hasText: 'Lease agreement' }).waitFor();
 });
 
+await check('document categories: a new category is offered to staff when uploading', async () => {
+  const gis = await signIn('gis.mo');
+  // Open a draft case through the API, as the GIS officer, then use the case page's upload form.
+  const caseId = await gis.evaluate(async () => {
+    const { csrfToken } = await (await fetch('/api/auth/session')).json();
+    const res = await fetch('/api/cases', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }, body: JSON.stringify({ caseType: 'first_registration', countyId: 1 }) });
+    return (await res.json()).id;
+  });
+  await gis.goto(`${BASE}/work/cases/${caseId}`);
+  await gis.getByLabel('Document type').locator('option', { hasText: 'Lease agreement' }).waitFor({ state: 'attached' });
+  await gis.context().close();
+});
+
 await check('reports: CSV download', async () => {
   await nav(admin).getByRole('link', { name: 'Reports & Analytics' }).click();
   const [download] = await Promise.all([admin.waitForEvent('download'), admin.locator('li', { hasText: 'Staff accounts' }).getByRole('button', { name: /Download CSV/ }).click()]);

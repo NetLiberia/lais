@@ -41,21 +41,25 @@ export const FEATURE_LIMITS: Record<string, { min: number; max: number; label: s
  * Extracts the features of an import, in file order.
  * Accepts a FeatureCollection, a Feature, or a bare geometry.
  */
+type JsonObject = Record<string, unknown>;
+/** A JSON object: not null and not an array. The file is untrusted, so every level is checked. */
+const isObject = (v: unknown): v is JsonObject => typeof v === 'object' && v !== null && !Array.isArray(v);
+
 export function extractFeatures(text: string, declaredSrid: number, limits: { min: number; max: number; label: string }): SingleFeature[] {
-  let doc: any;
+  let doc: unknown;
   try {
     doc = JSON.parse(text);
   } catch {
     throw badRequest('The file is not valid JSON');
   }
-  if (!doc || typeof doc !== 'object') throw badRequest('The file is not a GeoJSON object');
+  if (!isObject(doc)) throw badRequest('The file is not a GeoJSON object');
 
   const fileSrid = parseCrsMember(doc.crs);
   if (fileSrid !== null && fileSrid !== declaredSrid) {
     throw badRequest(`Declared CRS EPSG:${declaredSrid} conflicts with the file's CRS EPSG:${fileSrid}`);
   }
 
-  let features: any[];
+  let features: unknown[];
   if (doc.type === 'FeatureCollection') {
     if (!Array.isArray(doc.features)) throw badRequest('FeatureCollection has no features array');
     features = doc.features;
@@ -71,13 +75,13 @@ export function extractFeatures(text: string, declaredSrid: number, limits: { mi
   }
 
   return features.map((feature, i) => {
-    if (!feature?.geometry || typeof feature.geometry !== 'object') throw badRequest(`Feature ${i + 1} has no geometry`);
+    if (!isObject(feature) || !isObject(feature.geometry)) throw badRequest(`Feature ${i + 1} has no geometry`);
     const featureSrid = parseCrsMember(feature.geometry.crs);
     if (featureSrid !== null && featureSrid !== declaredSrid) {
       throw badRequest(`Declared CRS EPSG:${declaredSrid} conflicts with the CRS of feature ${i + 1} (EPSG:${featureSrid})`);
     }
     const { crs: _ignored, ...geometry } = feature.geometry;
-    const properties = feature.properties && typeof feature.properties === 'object' ? feature.properties : {};
+    const properties = isObject(feature.properties) ? feature.properties : {};
     return { geometry, properties };
   });
 }

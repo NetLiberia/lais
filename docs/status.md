@@ -6,11 +6,11 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 
 | Suite | Result |
 |---|---|
-| `npm test`: unit tests (policy, workflow, helpers, CSV safety, permission document) | 42 passed |
+| `npm test`: unit tests (policy, workflow, helpers, CSV safety, permission document) | 44 passed |
 | `npm test`: integration tests against a real PostgreSQL + PostGIS database | 93 passed |
 | `npm test`: web component tests (shared dialogs and tables, permission-aware navigation, account creation) in jsdom | 18 passed |
-| `npm run lint` (ESLint with typescript-eslint and the React hooks rules) | 0 errors; 91 warnings, all `no-explicit-any` in the older staff pages |
-| `npm run e2e`: browser walkthroughs in Microsoft Edge (7 scripts) | 80 steps passed, 0 problems |
+| `npm run lint` (ESLint with typescript-eslint and the React hooks rules) | 0 errors, 0 warnings. `any` is an error outside test files |
+| `npm run e2e`: browser walkthroughs in Microsoft Edge (7 scripts) | 81 steps passed, 0 problems |
 | `npm run backup:verify` on a backup taken through the interface | Restored and verified (see [backup-restore.md](backup-restore.md)) |
 | `npm run typecheck`, `npm run build` | Clean |
 
@@ -52,7 +52,7 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 - Audit & Security Logs, with the administrator's technical scope, filters, cursor paging and event detail.
 - System Health from live checks: database, PostGIS, API, GIS queue, storage, latest backup, security events and audit-chain integrity. Background jobs are honestly reported as *unknown*.
 - Allow-listed settings, including the portal banner shown to staff.
-- Document categories: add, and activate or deactivate. System categories are protected, and uploads require an active category.
+- Document categories: add, and activate or deactivate. System categories are protected. The case upload form lists the active categories, so new ones are offered to staff at once.
 - Backups: `pg_dump` from the interface, recorded with SHA-256, and a restore check.
 - Reports as CSV: staff accounts, land applications (metadata only), GIS import jobs and county configuration. Each export is audited.
 
@@ -69,7 +69,6 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 |---|---|
 | OpenAPI | Operations, parameters, security and error responses are described. Request and response bodies are not described field by field; they are enforced by Zod schemas in the code. |
 | Front-end component tests | Cover the shared kit, the shell navigation and user management. The other pages rely on the browser walkthroughs. |
-| Type strictness | The older staff pages (cases, parcels, parties, document requests) still use `any` for API responses: 91 lint warnings. |
 | Styling | Plain CSS with design tokens rather than Tailwind (documented in [architecture.md](architecture.md)). |
 | Backups | On demand only. No schedule, no off-host copy, no encryption at rest. Document files are not included. |
 | MFA | Available for every account; compulsory for privileged roles only when `MFA_ENFORCED=true`. |

@@ -4,19 +4,20 @@ import { api, CASE_TYPE_LABELS, fmtDate, human } from '../api';
 import { ParcelMap } from '../components/ParcelMap';
 import { ErrorBox, Section, StatusPill, useAction, useLoad } from '../components/ui';
 import { useAuth } from '../auth';
+import type { ParcelRecordResponse } from '../types';
 
 /** Internal registry record. Every view is logged on the server. */
 export function ParcelRecord() {
   const { upi } = useParams();
   const { hasRole } = useAuth();
-  const { data, error, reload } = useLoad(() => api(`/parcels/${upi}`), [upi]);
+  const { data, error, reload } = useLoad(() => api<ParcelRecordResponse>(`/parcels/${upi}`), [upi]);
   const action = useAction();
   const [reason, setReason] = useState('');
   const [referral, setReferral] = useState('');
 
   if (error) return <div className="page"><ErrorBox error={error} /></div>;
   if (!data) return <p className="pad muted">Loading…</p>;
-  const current = data.versions.find((v: any) => !v.valid_to);
+  const current = data.versions.find((v) => !v.valid_to);
   // A retired parcel has no current version; show its last one.
   const shown = current ?? data.versions[0];
   const retired = data.parcel.status === 'retired';
@@ -49,7 +50,7 @@ export function ParcelRecord() {
       {retired && (
         <div className="alert info">
           This parcel is retired. It was replaced by{' '}
-          {data.children.map((c: any, i: number) => <span key={c.upi}>{i > 0 && ', '}<Link to={`/work/parcels/${c.upi}`}>{c.upi}</Link></span>)}
+          {data.children.map((c, i) => <span key={c.upi}>{i > 0 && ', '}<Link to={`/work/parcels/${c.upi}`}>{c.upi}</Link></span>)}
           {data.children[0] && ` (${data.children[0].case_no})`}. Its records are kept as history.
         </div>
       )}
@@ -59,7 +60,7 @@ export function ParcelRecord() {
             <table className="table">
               <thead><tr><th>Holder</th><th>Interest</th><th>Share</th><th>Status</th><th>Since</th><th>Case</th></tr></thead>
               <tbody>
-                {data.currentRights.map((r: any) => (
+                {data.currentRights.map((r) => (
                   <tr key={r.id}>
                     <td>{r.party_name} <span className="muted small">({r.party_type})</span></td>
                     <td>{human(r.rrr_type)}</td>
@@ -71,7 +72,7 @@ export function ParcelRecord() {
                 ))}
               </tbody>
             </table>
-            {data.currentRights.some((r: any) => r.interest_status !== 'registered') && (
+            {data.currentRights.some((r) => r.interest_status !== 'registered') && (
               <div className="alert info small">
                 Interests marked <strong>documented</strong> are names copied from a legacy record. They have not been verified or registered.
                 {hasRole('processor') && !retired && (
@@ -86,7 +87,7 @@ export function ParcelRecord() {
               <table className="table">
                 <thead><tr><th>Holder</th><th>Interest</th><th>Status</th><th>From</th><th>To</th><th>Ended by</th></tr></thead>
                 <tbody>
-                  {data.historicalRights.map((r: any) => (
+                  {data.historicalRights.map((r) => (
                     <tr key={r.id}>
                       <td>{r.party_name}</td><td>{human(r.rrr_type)}</td><td>{r.interest_status}</td>
                       <td className="small">{fmtDate(r.valid_from)}</td><td className="small">{fmtDate(r.valid_to)}</td>
@@ -101,7 +102,7 @@ export function ParcelRecord() {
             <table className="table">
               <thead><tr><th>#</th><th>Category</th><th>Use</th><th>Calculated area</th><th>Source</th><th>Valid</th><th>Published by</th></tr></thead>
               <tbody>
-                {data.versions.map((v: any) => (
+                {data.versions.map((v) => (
                   <tr key={v.id}>
                     <td>{v.version_no}</td><td>{human(v.land_category)}</td><td>{v.land_use ?? '—'}</td>
                     <td>{Number(v.area_m2_calculated).toLocaleString()} m²{v.area_m2_surveyed && <div className="small">surveyed {Number(v.area_m2_surveyed).toLocaleString()} m²</div>}</td>
@@ -120,10 +121,10 @@ export function ParcelRecord() {
           {(data.parents.length > 0 || data.children.length > 0) && (
             <Section title="Lineage">
               <ul className="plain">
-                {data.parents.map((p: any) => (
+                {data.parents.map((p) => (
                   <li key={`p-${p.upi}`}>Created from <Link to={`/work/parcels/${p.upi}`}>{p.upi}</Link> <span className="muted small">({p.status}) by {p.case_no}</span></li>
                 ))}
-                {data.children.map((c: any) => (
+                {data.children.map((c) => (
                   <li key={`c-${c.upi}`}>Replaced by <Link to={`/work/parcels/${c.upi}`}>{c.upi}</Link> <span className="muted small">({c.status}) by {c.case_no}</span></li>
                 ))}
               </ul>
@@ -132,7 +133,7 @@ export function ParcelRecord() {
           <Section title="Cases">
             {data.cases.length === 0 ? <p className="muted">No cases since initial load.</p> : (
               <ul className="plain">
-                {data.cases.map((c: any) => (
+                {data.cases.map((c) => (
                   <li key={c.id}><Link to={`/work/cases/${c.id}`}>{c.case_no}</Link> {CASE_TYPE_LABELS[c.case_type]} <StatusPill status={c.status} /></li>
                 ))}
               </ul>
@@ -141,7 +142,7 @@ export function ParcelRecord() {
           <Section title="Disputes">
             {data.disputes.length === 0 && <p className="muted">None recorded.</p>}
             <ul className="plain">
-              {data.disputes.map((d: any) => (
+              {data.disputes.map((d) => (
                 <li key={d.id} className="dispute">
                   <strong>{d.closed_at ? 'Closed' : 'Open'}</strong> — opened by {d.opened_by}, {fmtDate(d.opened_at)}
                   <div>{d.reason}</div>

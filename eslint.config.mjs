@@ -12,13 +12,17 @@ export default tseslint.config(
     rules: {
       // Unused values are mistakes, except deliberately ignored ones written as _name.
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' }],
-      // Typing debt in the older staff pages, not a defect: reported, and to be reduced over time.
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
     },
   },
   {
     files: ['server/**/*.ts', 'e2e/**/*.mjs', '*.js'],
     languageOptions: { globals: globals.node },
+  },
+  {
+    // Tests assert on parsed JSON responses, where `any` keeps the assertions readable.
+    files: ['**/*.test.{ts,tsx}'],
+    rules: { '@typescript-eslint/no-explicit-any': 'off' },
   },
   {
     files: ['e2e/**/*.mjs'],

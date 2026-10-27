@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, fmtDate, human } from '../api';
 import { useAuth } from '../auth';
 import { ErrorBox, Section, useAction, useLoad } from '../components/ui';
+import type { DocumentRequestDetailResponse, DocumentRequestRow } from '../types';
 
 const STATUS_LABELS: Record<string, string> = {
   submitted: 'Awaiting preparation',
@@ -22,7 +23,7 @@ export function DocumentRequestList() {
   const { hasRole } = useAuth();
   const navigate = useNavigate();
   const [status, setStatus] = useState(hasRole('registrar') ? 'prepared' : hasRole('processor') ? 'submitted' : '');
-  const { data, error } = useLoad(() => api<any[]>(`/document-requests${status ? `?status=${status}` : ''}`), [status]);
+  const { data, error } = useLoad(() => api<DocumentRequestRow[]>(`/document-requests${status ? `?status=${status}` : ''}`), [status]);
   return (
     <div className="page">
       <h1>Document requests</h1>
@@ -60,7 +61,7 @@ export function DocumentRequestList() {
 
 export function DocumentRequestDetail() {
   const { id } = useParams();
-  const { data, error, reload } = useLoad(() => api(`/document-requests/${id}`), [id]);
+  const { data, error, reload } = useLoad(() => api<DocumentRequestDetailResponse>(`/document-requests/${id}`), [id]);
   const action = useAction();
   const [selected, setSelected] = useState<string[]>([]);
   const [note, setNote] = useState('');
@@ -68,7 +69,7 @@ export function DocumentRequestDetail() {
   const [reason, setReason] = useState('');
 
   useEffect(() => {
-    if (data) setSelected(data.candidates.filter((c: any) => c.selected).map((c: any) => c.id));
+    if (data) setSelected(data.candidates.filter((c) => c.selected).map((c) => c.id));
   }, [data]);
 
   if (error) return <div className="page"><ErrorBox error={error} /></div>;
@@ -87,7 +88,7 @@ export function DocumentRequestDetail() {
     await after(await action.run(() => api(`/document-requests/${id}/decide`, { body: { decision, reason } })));
   };
   const toggle = (docId: string) => setSelected((cur) => (cur.includes(docId) ? cur.filter((x) => x !== docId) : [...cur, docId]));
-  const shown = preparing ? data.candidates : data.candidates.filter((c: any) => c.selected);
+  const shown = preparing ? data.candidates : data.candidates.filter((c) => c.selected);
 
   return (
     <div className="page">
@@ -131,7 +132,7 @@ export function DocumentRequestDetail() {
               <table className="table">
                 <thead><tr>{preparing && <th />}<th>Type</th><th>Reference</th><th>Class</th><th>From case</th></tr></thead>
                 <tbody>
-                  {shown.map((d: any) => (
+                  {shown.map((d) => (
                     <tr key={d.id} className={d.releasable ? '' : 'muted'}>
                       {preparing && (
                         <td>

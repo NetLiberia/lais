@@ -103,7 +103,7 @@ function Counties() {
 function FitTo({ overlays }: { overlays: Overlay[] }) {
   const map = useMap();
   useEffect(() => {
-    const group = L.featureGroup(overlays.map((o) => L.geoJSON(o.data as any)));
+    const group = L.featureGroup(overlays.map((o) => L.geoJSON(o.data)));
     const bounds = group.getBounds();
     if (bounds.isValid()) map.fitBounds(bounds.pad(1.5), { maxZoom: 18 });
   }, [map, overlays]);
@@ -124,7 +124,7 @@ export function ParcelMap({ overlays = [], fitOverlays = true, showParcels = tru
         {overlays.map((o) => (
           <GeoJSON
             key={`${o.id}-${JSON.stringify(o.data).length}`}
-            data={o.data as any}
+            data={o.data}
             style={{ color: o.color, weight: 3, fillOpacity: 0.3, dashArray: o.dashed ? '6 4' : undefined }}
             onEachFeature={(_f, layer) => o.label && layer.bindTooltip(o.label, { sticky: true })}
           />

@@ -2,21 +2,22 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmtDate } from '../api';
 import { ErrorBox, useAction, useLoad } from '../components/ui';
+import type { AuditListResponse, ChainVerification } from '../types';
 
 export function AuditLog() {
   const [filters, setFilters] = useState({ action: '', outcome: '', actor: '' });
   const [applied, setApplied] = useState(filters);
   const qs = new URLSearchParams(Object.entries(applied).filter(([, v]) => v)).toString();
-  const { data, error } = useLoad(() => api(`/audit${qs ? `?${qs}` : ''}`), [qs]);
+  const { data, error } = useLoad(() => api<AuditListResponse>(`/audit${qs ? `?${qs}` : ''}`), [qs]);
   const verify = useAction();
-  const [chain, setChain] = useState<any>(null);
+  const [chain, setChain] = useState<ChainVerification | null>(null);
 
   return (
     <div className="page">
       <div className="page-head">
         <h1>Audit trail</h1>
         {data?.scope === 'all' && (
-          <button className="secondary" onClick={() => void verify.run(async () => setChain(await api('/audit/verify')))}>Verify hash chain</button>
+          <button className="secondary" onClick={() => void verify.run(async () => setChain(await api<ChainVerification>('/audit/verify')))}>Verify hash chain</button>
         )}
       </div>
       {data?.scope === 'technical' && <div className="alert info">System administrators see technical events (sign-ins and account administration) only.</div>}
@@ -37,7 +38,7 @@ export function AuditLog() {
       <table className="table audit">
         <thead><tr><th>#</th><th>When</th><th>Actor</th><th>Action</th><th>Outcome</th><th>Target</th><th>Detail</th></tr></thead>
         <tbody>
-          {data?.events.map((e: any) => (
+          {data?.events.map((e) => (
             <tr key={e.chain_seq} className={`o-${e.outcome}`}>
               <td>{e.chain_seq}</td>
               <td className="small">{fmtDate(e.at)}</td>

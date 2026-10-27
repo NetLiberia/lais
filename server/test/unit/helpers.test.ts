@@ -79,6 +79,21 @@ describe('GeoJSON intake', () => {
   it('rejects non-JSON', () => {
     expect(() => extractSingleFeature('not json', 4326)).toThrow(/valid JSON/);
   });
+
+  it('rejects malformed structures in an untrusted file', () => {
+    expect(() => extractSingleFeature('[1, 2]', 4326)).toThrow(/not a GeoJSON object/);
+    expect(() => extractSingleFeature('null', 4326)).toThrow(/not a GeoJSON object/);
+    const fc = (features: unknown) => JSON.stringify({ type: 'FeatureCollection', features });
+    expect(() => extractSingleFeature(fc([null]), 4326)).toThrow(/Feature 1 has no geometry/);
+    expect(() => extractSingleFeature(fc([{ type: 'Feature', geometry: [polygon] }]), 4326)).toThrow(/Feature 1 has no geometry/);
+  });
+
+  it('ignores properties that are not an object', () => {
+    for (const properties of [[1, 2], 'text', null]) {
+      const doc = { type: 'Feature', geometry: polygon, properties };
+      expect(extractSingleFeature(JSON.stringify(doc), 4326).properties).toEqual({});
+    }
+  });
 });
 
 describe('legacy record attributes', () => {

@@ -116,10 +116,10 @@ If another app already uses port 4000 or 5173, set `PORT=4100` in `server/.env` 
 npm test
 ```
 
-- **42 unit tests**: permission matrix (and a check that `docs/permission-matrix.md` matches it), CSV formula safety, cross-county denial, separation of duties, workflow (including a check that the TypeScript transition table matches the SQL trigger), TOTP RFC test vectors, password hashing, GeoJSON/CRS intake, fractional shares, file sniffing.
+- **44 unit tests**: permission matrix (and a check that `docs/permission-matrix.md` matches it), CSV formula safety, cross-county denial, separation of duties, workflow (including a check that the TypeScript transition table matches the SQL trigger), TOTP RFC test vectors, password hashing, GeoJSON/CRS intake (including malformed files), fractional shares, file sniffing.
 - **93 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration, transfer, subdivision, consolidation, correction, legacy-migration and confirmation lifecycles, landowner document requests, rate limits, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, administrator limits, the account lifecycle (invitation, activation, reset, suspension), the dashboard figures against the database, county enablement, settings, backups, reports, and the OpenAPI description. Two concurrency tests run only against a real multi-connection server. One publishes two overlapping parcels at the same moment and checks that the per-county lock lets only one through (verified to fail with the lock removed). The other checks that the audit hash chain survives 40 parallel writers.
 
-Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 135 tests in about 26 seconds with the default 10-connection pool.
+Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 137 tests in about 26 seconds with the default 10-connection pool.
 
 `npm test` also runs **18 web component tests** (Vitest, Testing Library, jsdom). They cover:
 - the shared dialogs: a reason is required, server refusals are shown, and focus stays where the user is typing;
@@ -127,9 +127,9 @@ Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 135 tests in about 26 sec
 - the navigation each role sees;
 - the create-account form: county rules, no surveyor role, no password field, and a one-time link.
 
-`npm run lint` runs ESLint over the API, the web app and the walkthroughs.
+`npm run lint` runs ESLint over the API, the web app and the walkthroughs. API responses are typed in `web/src/types.ts`, and `any` is a lint error outside test files.
 
-**Browser walkthroughs.** With the API and web app running, `npm run e2e` drives Microsoft Edge through seven scripted journeys: registration, subdivision, document requests, corrections, legacy migration, confirmation, and the administrator dashboard. It resets the development database before each one. Set `LAIS_WEB_URL` if the web app is not on port 5173, and `BROWSER_PATH` for another Chromium browser. Screenshots go to `e2e/shots/`. Last run: 80 steps, 0 problems.
+**Browser walkthroughs.** With the API and web app running, `npm run e2e` drives Microsoft Edge through seven scripted journeys: registration, subdivision, document requests, corrections, legacy migration, confirmation, and the administrator dashboard. It resets the development database before each one. Set `LAIS_WEB_URL` if the web app is not on port 5173, and `BROWSER_PATH` for another Chromium browser. Screenshots go to `e2e/shots/`. Last run: 81 steps, 0 problems.
 
 **Backups.** `npm run backup:verify -w server -- <file>` restores a backup into `TEST_DATABASE_URL` and checks it (see [docs/backup-restore.md](docs/backup-restore.md)).
 

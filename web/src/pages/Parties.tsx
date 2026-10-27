@@ -2,15 +2,16 @@ import { useState, type FormEvent } from 'react';
 import { api, fmtDate } from '../api';
 import { useAuth } from '../auth';
 import { ErrorBox, Section, useAction, useLoad } from '../components/ui';
+import type { PartySensitive, PartySummary } from '../types';
 
 export function Parties() {
   const { hasRole } = useAuth();
   const isProcessor = hasRole('processor');
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
-  const { data, error, reload } = useLoad(() => api<any[]>(`/parties?q=${encodeURIComponent(query)}`), [query]);
+  const { data, error, reload } = useLoad(() => api<PartySummary[]>(`/parties?q=${encodeURIComponent(query)}`), [query]);
   const action = useAction();
-  const [sensitive, setSensitive] = useState<Record<string, any>>({});
+  const [sensitive, setSensitive] = useState<Record<string, PartySensitive>>({});
   const [form, setForm] = useState({ partyType: 'person', name: '', nationalIdRef: '', contact: '' });
 
   const create = async (e: FormEvent) => {
@@ -30,7 +31,7 @@ export function Parties() {
   };
   const reveal = async (id: string) => {
     await action.run(async () => {
-      const p = await api(`/parties/${id}/sensitive`);
+      const p = await api<PartySensitive>(`/parties/${id}/sensitive`);
       setSensitive((s) => ({ ...s, [id]: p }));
     });
   };

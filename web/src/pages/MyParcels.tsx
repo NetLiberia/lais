@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { api, fmtDate, human } from '../api';
 import { ParcelMap } from '../components/ParcelMap';
 import { ErrorBox, Section, useAction, useLoad } from '../components/ui';
+import type { MyDocumentRequest, MyParcel } from '../types';
 
 const REQUESTABLE = [
   { value: 'deed', label: 'Deed or title document' },
@@ -21,8 +22,8 @@ const REQUEST_STATUS: Record<string, string> = {
 
 /** Landowner portal: registered interests of the parties linked to this account, and document requests. */
 export function MyParcels() {
-  const parcels = useLoad(() => api<any[]>('/me/parcels'));
-  const requests = useLoad(() => api<any[]>('/me/document-requests'));
+  const parcels = useLoad(() => api<MyParcel[]>('/me/parcels'));
+  const requests = useLoad(() => api<MyDocumentRequest[]>('/me/document-requests'));
   const [requesting, setRequesting] = useState<string | null>(null);
 
   return (
@@ -48,7 +49,7 @@ export function MyParcels() {
                 <dt>Record status</dt><dd>{p.status === 'disputed' ? 'under dispute' : 'registered'}</dd>
               </dl>
               <ul className="plain">
-                {p.my_interests.map((i: any, n: number) => (
+                {p.my_interests.map((i, n) => (
                   <li key={n}>{human(i.rrrType)}{i.share && ` ${i.share}`} held by {i.holder} since {fmtDate(i.since)}</li>
                 ))}
               </ul>
@@ -110,7 +111,7 @@ function RequestForm({ upi, onDone, onCancel }: { upi: string; onDone: () => voi
   );
 }
 
-function MyRequests({ requests, onChange }: { requests: any[] | null; onChange: () => void }) {
+function MyRequests({ requests, onChange }: { requests: MyDocumentRequest[] | null; onChange: () => void }) {
   const action = useAction();
   if (!requests || requests.length === 0) return null;
   const withdraw = async (id: string) => {
@@ -135,7 +136,7 @@ function MyRequests({ requests, onChange }: { requests: any[] | null; onChange: 
               <td className="small">
                 {r.status === 'approved' && (r.release_active
                   ? <>
-                      {r.released_documents.map((d: any) => (
+                      {(r.released_documents ?? []).map((d) => (
                         <div key={d.id}><a href={`/api/me/document-requests/${r.id}/documents/${d.id}/file`}>{human(d.docType)}{d.referenceNo && ` ${d.referenceNo}`}</a></div>
                       ))}
                       <div className="muted">Available until {fmtDate(r.release_expires_at)}</div>

@@ -3,13 +3,14 @@ import { Link, useParams } from 'react-router-dom';
 import { api, CASE_TYPE_LABELS, fmtDate, human } from '../api';
 import { ParcelMap, type Overlay } from '../components/ParcelMap';
 import { ErrorBox, Section, StatusPill, useAction, useLoad } from '../components/ui';
+import type { CaseDetailResponse, CaseParcel, DocumentCategory, PartySummary, StagedFeature } from '../types';
 
 const RRR_TYPES = ['ownership', 'co_ownership', 'customary_tenure', 'lease', 'mortgage', 'easement'];
-const DOC_TYPES = ['survey_plan', 'deed', 'customary_certificate', 'id_document', 'power_of_attorney', 'other'];
+type Act = (fn: () => Promise<unknown>) => Promise<void>;
 
 export function CaseDetail() {
   const { id } = useParams();
-  const { data, error, reload } = useLoad(() => api(`/cases/${id}`), [id]);
+  const { data, error, reload } = useLoad(() => api<CaseDetailResponse>(`/cases/${id}`), [id]);
   const action = useAction();
 
   if (error) return <div className="page"><ErrorBox error={error} /></div>;
@@ -22,7 +23,7 @@ export function CaseDetail() {
     await reload();
   };
 
-  const features: any[] = data.staged?.features ?? [];
+  const features = data.staged?.features ?? [];
   const many = features.length > 1;
   const overlays: Overlay[] = [];
   for (const s of data.sources) {
@@ -43,7 +44,7 @@ export function CaseDetail() {
     overlays.push({ id: 'parcel', data: data.parcel.geometry, color: '#1f5fbf', dashed: cs.case_type === 'correction', label: `Published ${data.parcel.upi}` });
   }
   const resultLinks = data.children.length > 0 && (
-    <> · created {data.children.map((c: any, i: number) => <span key={c.upi}>{i > 0 && ', '}<Link to={`/work/parcels/${c.upi}`}>{c.upi}</Link></span>)}</>
+    <> · created {data.children.map((c, i) => <span key={c.upi}>{i > 0 && ', '}<Link to={`/work/parcels/${c.upi}`}>{c.upi}</Link></span>)}</>
   );
 
   return (
@@ -54,7 +55,7 @@ export function CaseDetail() {
           <p className="muted">
             {CASE_TYPE_LABELS[cs.case_type]} · {cs.county.name}
             {data.parcel && cs.case_type !== 'consolidation' && <> · parcel <Link to={`/work/parcels/${data.parcel.upi}`}>{data.parcel.upi}</Link></>}
-            {data.sources.length > 0 && <> · replaces {data.sources.map((s: any, i: number) => <span key={s.upi}>{i > 0 && ', '}<Link to={`/work/parcels/${s.upi}`}>{s.upi}</Link></span>)}</>}
+            {data.sources.length > 0 && <> · replaces {data.sources.map((s, i) => <span key={s.upi}>{i > 0 && ', '}<Link to={`/work/parcels/${s.upi}`}>{s.upi}</Link></span>)}</>}
             {resultLinks}
           </p>
         </div>
@@ -67,7 +68,7 @@ export function CaseDetail() {
           <Attributes data={data} editable={can('case.edit_attributes')} onSave={(body) => act(() => api(`/cases/${id}`, { method: 'PATCH', body }))} />
           {cs.case_type === 'transfer' && data.parcel && <CurrentRights parcel={data.parcel} note="On publication, ownership-type interests end and the incoming interests below are registered. Encumbrances carry forward." />}
           {cs.case_type === 'confirmation' && data.parcel && <CurrentRights parcel={data.parcel} note="These interests come from a legacy record and are unverified. On publication they end (kept as history) and the verified holders below are registered." />}
-          {data.sources.map((s: any) => (
+          {data.sources.map((s) => (
             <CurrentRights key={s.upi} parcel={s} note="When this case is published the parcel is retired: all its current interests end, including encumbrances. Record on the new parcel(s) every interest that continues." />
           ))}
           {cs.case_type === 'migration'
@@ -114,7 +115,7 @@ export function CaseDetail() {
           <table className="table">
             <thead><tr><th>Decision</th><th>By</th><th>Reason</th><th>Authority</th><th>When</th><th>Snapshot</th></tr></thead>
             <tbody>
-              {data.decisions.map((d: any) => (
+              {data.decisions.map((d) => (
                 <tr key={d.id} className={d.superseded_at ? 'muted' : ''}>
                   <td>{d.decision}{d.superseded_at && ' (superseded)'}</td><td>{d.decided_by}</td><td>{d.reason}</td>
                   <td>{d.authority_basis ?? '—'}</td><td>{fmtDate(d.decided_at)}</td><td><code className="small">{d.snapshot_hash.slice(0, 12)}…</code></td>
@@ -124,7 +125,7 @@ export function CaseDetail() {
           </table>
         )}
         <ol className="timeline">
-          {data.events.map((e: any) => (
+          {data.events.map((e) => (
             <li key={e.id}>
               <span className="muted small">{fmtDate(e.at)}</span> <strong>{e.actor ?? 'system'}</strong> {human(e.action)}
               {e.to_status && <> → <StatusPill status={e.to_status} /></>}
@@ -144,7 +145,7 @@ function Was({ published, proposed }: { published: unknown; proposed: unknown })
   return <span className="small changed"> (published: {published === null || published === undefined || published === '' ? '—' : String(published)})</span>;
 }
 
-function Attributes({ data, editable, onSave }: { data: any; editable: boolean; onSave: (b: object) => void }) {
+function Attributes({ data, editable, onSave }: { data: CaseDetailResponse; editable: boolean; onSave: (b: object) => void }) {
   const cs = data.case;
   const [form, setForm] = useState({
     landCategory: cs.land_category ?? '',
@@ -220,11 +221,11 @@ function Attributes({ data, editable, onSave }: { data: any; editable: boolean; 
   );
 }
 
-function CurrentRights({ parcel, note }: { parcel: any; note: string }) {
+function CurrentRights({ parcel, note }: { parcel: CaseParcel; note: string }) {
   return (
     <Section title={`Interests on ${parcel.upi}${parcel.status === 'retired' ? ' (retired)' : ''}`}>
       <ul className="plain">
-        {parcel.current_rights.map((r: any, i: number) => (
+        {parcel.current_rights.map((r, i) => (
           <li key={i} className={r.ended ? 'muted' : ''}>
             {human(r.rrrType)}{r.share && ` ${r.share}`} — {r.partyName} <span className="muted">({r.partyType}{r.interestStatus && r.interestStatus !== 'registered' ? `, ${r.interestStatus}` : ''})</span>{r.ended && ' — ended by this case'}
           </li>
@@ -237,10 +238,10 @@ function CurrentRights({ parcel, note }: { parcel: any; note: string }) {
 
 function PartyPicker({ onPick }: { onPick: (p: { id: string; name: string }) => void }) {
   const [q, setQ] = useState('');
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<PartySummary[]>([]);
   const search = async (e: FormEvent) => {
     e.preventDefault();
-    setResults(await api(`/parties?q=${encodeURIComponent(q)}`));
+    setResults(await api<PartySummary[]>(`/parties?q=${encodeURIComponent(q)}`));
   };
   return (
     <div>
@@ -261,7 +262,7 @@ function PartyPicker({ onPick }: { onPick: (p: { id: string; name: string }) => 
   );
 }
 
-function Rights({ data, editable, act, caseId, featureCount }: { data: any; editable: boolean; act: (fn: () => Promise<unknown>) => Promise<void>; caseId: string; featureCount: number }) {
+function Rights({ data, editable, act, caseId, featureCount }: { data: CaseDetailResponse; editable: boolean; act: Act; caseId: string; featureCount: number }) {
   const [party, setParty] = useState<{ id: string; name: string } | null>(null);
   const [rrrType, setRrrType] = useState('ownership');
   const [share, setShare] = useState('');
@@ -291,7 +292,7 @@ function Rights({ data, editable, act, caseId, featureCount }: { data: any; edit
         <table className="table">
           <thead><tr>{subdivision && <th>New parcel</th>}<th>Party</th><th>Interest</th><th>Share</th><th>Identity</th>{editable && <th />}</tr></thead>
           <tbody>
-            {data.rights.map((r: any) => (
+            {data.rights.map((r) => (
               <tr key={r.id}>
                 {subdivision && <td>{r.feature_index === null ? <span className="danger">unassigned</span> : r.feature_index + 1}</td>}
                 <td>{r.party_name} <span className="muted small">({r.party_type})</span></td>
@@ -328,7 +329,9 @@ function Rights({ data, editable, act, caseId, featureCount }: { data: any; edit
   );
 }
 
-function Documents({ data, canUpload, act, caseId }: { data: any; canUpload: boolean; act: (fn: () => Promise<unknown>) => Promise<void>; caseId: string }) {
+function Documents({ data, canUpload, act, caseId }: { data: CaseDetailResponse; canUpload: boolean; act: Act; caseId: string }) {
+  // The categories an administrator has made available, so new ones appear here without a code change.
+  const categories = useLoad(() => (canUpload ? api<DocumentCategory[]>('/document-categories') : Promise.resolve([])), [canUpload]);
   const [docType, setDocType] = useState('survey_plan');
   const [classification, setClassification] = useState('restricted');
   const [referenceNo, setReferenceNo] = useState('');
@@ -358,7 +361,7 @@ function Documents({ data, canUpload, act, caseId }: { data: any; canUpload: boo
         <table className="table">
           <thead><tr><th>Type</th><th>Reference</th><th>Class</th><th>Uploaded</th><th>Check</th><th /></tr></thead>
           <tbody>
-            {data.documents.map((d: any) => (
+            {data.documents.map((d) => (
               <tr key={d.id}>
                 <td>{human(d.doc_type)}</td>
                 <td>{d.reference_no ?? '—'}{d.issuer && <div className="small muted">{d.issuer}</div>}</td>
@@ -385,8 +388,8 @@ function Documents({ data, canUpload, act, caseId }: { data: any; canUpload: boo
       {canUpload && (
         <form key={formKey} onSubmit={upload} className="stack compact">
           <div className="row wrap">
-            <select value={docType} onChange={(e) => setDocType(e.target.value)}>
-              {DOC_TYPES.map((t) => <option key={t} value={t}>{human(t)}</option>)}
+            <select value={docType} onChange={(e) => setDocType(e.target.value)} aria-label="Document type">
+              {(categories.data ?? []).map((c) => <option key={c.code} value={c.code} title={c.description ?? undefined}>{c.label}</option>)}
             </select>
             <select value={docType === 'id_document' ? 'highly_sensitive' : classification} disabled={docType === 'id_document'} onChange={(e) => setClassification(e.target.value)}>
               <option value="public">Public</option><option value="restricted">Restricted</option><option value="highly_sensitive">Highly sensitive</option>
@@ -406,7 +409,7 @@ function Documents({ data, canUpload, act, caseId }: { data: any; canUpload: boo
   );
 }
 
-function GeometryImport({ caseId, act }: { caseId: string; act: (fn: () => Promise<unknown>) => Promise<void> }) {
+function GeometryImport({ caseId, act }: { caseId: string; act: Act }) {
   const [crs, setCrs] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const submit = (e: FormEvent) => {
@@ -433,7 +436,7 @@ function GeometryImport({ caseId, act }: { caseId: string; act: (fn: () => Promi
   );
 }
 
-function Validation({ data, act, caseId, canValidate, canAcknowledge }: { data: any; act: (fn: () => Promise<unknown>) => Promise<void>; caseId: string; canValidate: boolean; canAcknowledge: boolean }) {
+function Validation({ data, act, caseId, canValidate, canAcknowledge }: { data: CaseDetailResponse; act: Act; caseId: string; canValidate: boolean; canAcknowledge: boolean }) {
   const v = data.validation;
   const acknowledge = (findingId: string) => {
     const note = window.prompt('Investigation note for this finding (required):');
@@ -449,7 +452,7 @@ function Validation({ data, act, caseId, canValidate, canAcknowledge }: { data: 
           <p className="small muted">Run {fmtDate(v.run.run_at)} ({v.run.purpose}): {v.run.error_count} error(s), {v.run.warning_count} warning(s).</p>
           {v.findings.length === 0 && <div className="alert ok">No issues found.</div>}
           <ul className="findings">
-            {v.findings.map((f: any) => (
+            {v.findings.map((f) => (
               <li key={f.id} className={f.severity}>
                 <span className={`pill ${f.severity === 'error' ? 'sev-error' : 'sev-warn'}`}>{f.severity}</span> <code className="small">{f.code}</code>
                 <div>{f.message}</div>
@@ -468,7 +471,7 @@ function Validation({ data, act, caseId, canValidate, canAcknowledge }: { data: 
   );
 }
 
-function Actions({ act, caseId, can }: { act: (fn: () => Promise<unknown>) => Promise<void>; caseId: string; can: (a: string) => boolean }) {
+function Actions({ act, caseId, can }: { act: Act; caseId: string; can: (a: string) => boolean }) {
   const [decision, setDecision] = useState('approved');
   const [reason, setReason] = useState('');
   const [authorityBasis, setAuthorityBasis] = useState('');
@@ -522,15 +525,15 @@ function Actions({ act, caseId, can }: { act: (fn: () => Promise<unknown>) => Pr
 }
 
 /** Per-feature view of a migration batch: legacy attributes, findings, quarantine and outcome. */
-function MigrationFeatures({ data, act, caseId, canExclude }: { data: any; act: (fn: () => Promise<unknown>) => Promise<void>; caseId: string; canExclude: boolean }) {
+function MigrationFeatures({ data, act, caseId, canExclude }: { data: CaseDetailResponse; act: Act; caseId: string; canExclude: boolean }) {
   const [onlyProblems, setOnlyProblems] = useState(false);
-  const features: any[] = data.staged?.features ?? [];
-  const findings: any[] = data.validation?.findings ?? [];
+  const features = data.staged?.features ?? [];
+  const findings = data.validation?.findings ?? [];
   const forFeature = (i: number) => findings.filter((f) => f.feature_index === i);
   const counts = { total: features.length, excluded: features.filter((f) => f.excluded).length, published: features.filter((f) => f.published_upi).length };
   const shown = onlyProblems ? features.filter((f) => f.excluded || forFeature(f.index).length > 0 || !f.structural_ok) : features;
 
-  const toggle = (f: any) => {
+  const toggle = (f: StagedFeature) => {
     if (f.excluded) {
       void act(() => api(`/cases/${caseId}/features/${f.index}/exclusion`, { body: { excluded: false } }));
       return;
