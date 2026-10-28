@@ -18,6 +18,8 @@ async function asUser(username) {
   await page.getByLabel('Password').fill(PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await page.waitForURL((u) => !/\/(login|start)/.test(u.pathname));
+  // GIS officers land on their GIS dashboard; this journey starts from the case list.
+  if (new URL(page.url()).pathname === '/gis') await page.goto(`${BASE}/work`);
   return page;
 }
 const shot = async (page, name) => { await page.waitForTimeout(700); await page.screenshot({ path: `${SHOTS}/${++step}-${name}.png`, fullPage: true }); };

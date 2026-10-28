@@ -204,10 +204,24 @@ adminOpsRouter.get('/health', async (req, res) => {
     });
   }
 
-  checks.push({
-    key: 'jobs', label: 'Background jobs', status: 'unknown',
-    summary: 'No background job runner is configured: imports and validation run during the request',
-  });
+  // GIS import and ArcMap sync jobs run inside the API process. A job still running after 10 minutes is
+  // stuck (a restart marks it failed); failures are reported, but they are usually data problems.
+  const jobs = await timed(() => pool.query(
+    `SELECT count(*) FILTER (WHERE status IN ('queued', 'running'))::int AS active,
+            count(*) FILTER (WHERE status IN ('queued', 'running') AND coalesce(started_at, created_at) < now() - interval '10 minutes')::int AS stuck,
+            count(*) FILTER (WHERE status = 'failed' AND created_at > now() - interval '24 hours')::int AS failed_24h
+       FROM staging.import_job`,
+  ));
+  if (jobs.error) {
+    checks.push({ key: 'jobs', label: 'Background jobs', status: 'error', summary: 'Could not read the GIS job table' });
+  } else {
+    const { active, stuck, failed_24h } = jobs.value!.rows[0];
+    checks.push({
+      key: 'jobs', label: 'Background jobs', status: stuck ? 'warning' : 'healthy',
+      summary: `GIS jobs run in the API process: ${active} active${stuck ? `, ${stuck} running for over 10 minutes` : ''}; ${failed_24h} failed in 24 hours`,
+      detail: { active, stuck, failed24h: failed_24h, runner: 'in-process' },
+    });
+  }
 
   const storage = await timed(async () => {
     await fs.mkdir(config.documentStorageDir, { recursive: true });

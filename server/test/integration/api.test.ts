@@ -996,7 +996,8 @@ describe.skipIf(!TEST_DB)('LAIS API (integration)', () => {
       const byKey = Object.fromEntries(res.body.checks.map((c: any) => [c.key, c]));
       expect(byKey.database.status).toBe('healthy');
       expect(byKey.postgis.summary).toMatch(/^PostGIS \d/);
-      expect(byKey.jobs.status).toBe('unknown');
+      expect(byKey.jobs.status).toBe('healthy');
+      expect(byKey.jobs.summary).toMatch(/GIS jobs run in the API process: 0 active/);
       expect(byKey.audit_chain.status).toBe('healthy');
       expect(JSON.stringify(res.body)).not.toMatch(/postgres:\/\/|password/i);
     });

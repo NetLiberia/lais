@@ -354,3 +354,136 @@ export interface ReportResult {
   filters: { from: string; to: string; stage: string | null; taskType: string | null; role: string | null };
   dataNotice: string; columns: ReportColumn[]; rows: Record<string, unknown>[];
 }
+
+// ---------------------------------------------------------------------------
+// GIS officer workspace (server/src/routes/gis.ts and gisWork.ts)
+// ---------------------------------------------------------------------------
+
+export type JobStatus = 'queued' | 'running' | 'completed' | 'completed_with_warnings' | 'failed' | 'cancelled';
+export interface GisKpis {
+  my_open_tasks: number; my_overdue_tasks: number; claimable_tasks: number; cases_in_preparation: number; returned_cases: number;
+  cases_with_blocking_errors: number; awaiting_review: number; accepted_30d: number; jobs_active: number; jobs_failed_7d: number;
+  versions_7d: number; open_conflicts: number;
+}
+export interface GisJobSummary { id: string; job_no: string; kind: string; status: JobStatus; source_name: string; created_at: string; case_no: string }
+export interface GisSummary {
+  kpis: GisKpis;
+  lastArcmapSync: { job_no: string; status: JobStatus; finished_at: string | null; created_at: string } | null;
+  recentJobs: GisJobSummary[];
+  myTasks: { id: string; task_no: string; title: string; status: string; priority: string; due_date: string | null; case_no: string | null }[];
+}
+export interface GisTask {
+  id: string; task_no: string; task_type: string; title: string; description: string | null; status: string; priority: string; due_date: string | null;
+  created_at: string; case_id: string | null; case_no: string | null; case_status: string | null; county_code: string; created_by_username: string;
+  overdue: boolean; acknowledged_at: string | null; last_clarification: string | null;
+}
+export interface GisCase {
+  id: string; case_no: string; case_type: CaseType; status: string; county_id: number; county_code: string; proposed_upi: string | null; priority: string;
+  batch_id: string | null; version_no: number | null; feature_count: number | null; declared_srid: number | null; version_at: string | null;
+  error_count: number | null; warning_count: number | null; validated_at: string | null;
+}
+export interface GisFeatureCollection { type: 'FeatureCollection'; features: { type: 'Feature'; geometry: Geometry; properties: Record<string, unknown> }[] }
+export type WorkspaceLayerKey = 'reference' | 'working' | 'submitted' | 'invalid' | 'overlaps' | 'duplicates' | 'boundary';
+export interface WorkspaceLayers { layers: Record<WorkspaceLayerKey, GisFeatureCollection>; truncated: boolean; limit: number }
+export interface FieldInfo { name: string; type: string }
+export interface LayerInfo {
+  name: string; featureCount: number; fields: FieldInfo[]; geometryTypes: string[];
+  crs: { epsg: number | null; name: string | null; source: 'prj' | 'geojson-crs' | 'none' }; sample: Record<string, unknown>[]; wktColumn?: string | null;
+}
+export interface UploadInspection {
+  uploadKey: string; file: string; size: number; sha256: string; format: string; layers: LayerInfo[]; manifest: Record<string, unknown> | null;
+  warnings: string[]; suggestedMapping: Record<string, Record<string, string>>; expiresInHours: number;
+}
+export interface ImportOptions {
+  formats: { format: string; label: string; supported: boolean; reason?: string }[];
+  acceptedCrs: { epsg: number; name: string }[];
+  targetFields: { key: string; label: string; type: string }[];
+  requiredFields: Record<string, string[]>;
+  limits: { maxUploadBytes: number; maxFeatures: number };
+}
+export interface ImportPreview {
+  caseNo: string; format: string; layer: string; file: string; sha256: string;
+  crs: { detected: number | null; declared: number; exceptionReason: string | null; name: string };
+  received: number; accepted: number; rejected: number; withinLimits: boolean; limitLabel: string | null;
+  rejections: { record: number; reason: string }[]; warnings: string[]; extent: number[] | null; sample: Record<string, unknown>[];
+}
+export interface GisJob {
+  id: string; job_no: string; kind: 'import' | 'arcmap_sync' | 'correction'; status: JobStatus; county_id: number; county_code: string; case_id: string; case_no: string;
+  case_status: string; initiated_by: string; initiated_by_username: string; purpose: string | null; source_name: string; source_format: string;
+  source_layer: string | null; source_size_bytes: string | null; source_sha256: string | null; source_crs_detected: number | null; source_crs_declared: number | null;
+  crs_exception_reason: string | null; target_crs: number; adapter_version: string | null; source_dataset: string | null; source_version: string | null;
+  export_id: string | null; field_mapping: Record<string, string>; records_received: number | null; records_accepted: number | null; records_rejected: number | null;
+  records_inserted: number | null; records_updated: number | null; records_unchanged: number | null; warning_count: number; error_summary: string | null;
+  batch_id: string | null; version_no: number | null; retry_of: string | null; retry_of_job_no: string | null; created_at: string; started_at: string | null;
+  finished_at: string | null; duration_s: string | null;
+}
+export interface GisJobDetail extends GisJob {
+  warnings: string[]; rejections: { record: number; reason: string }[]; manifest: Record<string, unknown> | null;
+  diagnostic: { step: string; ok: boolean; detail: string }[]; canRetry: boolean;
+}
+export interface GisJobList extends Paged<GisJob> { counts: Partial<Record<JobStatus, number>> }
+export interface ImportResult { jobId: string; jobNo: string; duplicate: boolean; job: GisJobDetail | null }
+export interface SyncToken {
+  id: string; label: string; token_hint: string; created_at: string; expires_at: string; last_used_at: string | null; revoked_at: string | null;
+  status: 'active' | 'expired' | 'revoked';
+}
+export interface SyncStatus {
+  state: 'not_configured' | 'token_unused' | 'configured'; explanation: string; lastContact: string | null; activeTokens: number; adapterVersion: string;
+  last_success: string | null; last_failure: string | null; failed_7d: number; total_7d: number; jobs: GisJob[];
+}
+export interface SyncDiagnostic { checks: { check: string; ok: boolean; detail: string }[]; acceptedCrs: number[]; endpoint: string }
+export interface CaseVersion {
+  id: string; version_no: number; status: string; source_kind: string; source_filename: string; declared_srid: number; feature_count: number;
+  change_reason: string | null; created_at: string; created_by: string; job_no: string | null; job_id: string | null; parent_version: number | null;
+  excluded_count: number; invalid_count: number; submissions: { submissionNo: string; id: string; at: string; outcome: string }[] | null;
+}
+export interface VersionList { caseNo: string; caseStatus: string; editable: boolean; versions: CaseVersion[] }
+export interface VersionChange {
+  featureIndex: number; change: 'added' | 'removed' | 'modified' | 'unchanged'; geometryChanged: boolean; maxShiftM: number | null;
+  areaFrom: string | null; areaTo: string | null; excludedFrom: boolean | null; excludedTo: boolean | null; attributes: { field: string; from: unknown; to: unknown }[];
+}
+export interface VersionCompare {
+  a: number; b: number; changes: VersionChange[];
+  summary: Record<'added' | 'removed' | 'modified' | 'unchanged', number>;
+  geometry: { a: GisFeatureCollection; b: GisFeatureCollection };
+}
+export interface SubmissionCheck {
+  caseNo: string; status: string; ready: boolean;
+  items: { key: string; label: string; ok: boolean; detail: string; needsAcknowledgement?: boolean; needsExplanation?: boolean }[];
+  previous: { id: string; submission_no: string; created_at: string; outcome: string; version_no: number | null } | null;
+  returnReason: { notes: string; instructions: string | null; issue_categories: string[]; created_at: string } | null;
+  errors: EvalFinding[]; warnings: EvalFinding[]; ruleSetVersion: number | null; boundaryStatus: string | null; canSubmit: boolean;
+}
+/** A finding straight from validation (not yet stored), as the submission check and the submit refusal return it. */
+export interface EvalFinding {
+  code: string; severity: Severity; message: string; relatedParcelId?: string | null; relatedCaseId?: string | null; featureIndex?: number | null;
+  detail?: Record<string, unknown>;
+}
+export interface GisSubmission {
+  id: string; submission_no: string; case_id: string; case_no: string; case_type: CaseType; county_code: string; created_at: string; submitted_by: string;
+  outcome: string; summary: string | null; change_explanation: string | null; outstanding_warnings: string | null; warnings_acknowledged: boolean;
+  snapshot_hash: string | null; feature_count: number; version_no: number | null; previous_submission_no: string | null; error_count: number | null;
+  warning_count: number | null; rule_set_version: number | null; review_decision: string | null; reviewed_at: string | null; status: string;
+}
+export interface GisSubmissionDetail extends GisSubmission {
+  snapshotIntact: boolean | null; findings: { code: string; severity: Severity; message: string; feature_index: number | null }[];
+  reviews: { decision: string; notes: string; instructions: string | null; issue_categories: string[]; affected_features: number[]; created_at: string; reviewer: string }[];
+}
+export interface ReturnedCase {
+  id: string; case_no: string; case_type: CaseType; county_code: string; priority: string; due_date: string | null; returned_at: string | null; return_note: string | null;
+  return_action: string | null; returned_by: string | null; review_notes: string | null; instructions: string | null; issue_categories: string[] | null;
+  affected_features: number[] | null; reviewer: string | null; error_count: number | null; warning_count: number | null; version_no: number | null; open_task_no: string | null;
+}
+export interface ValidationFindingRow {
+  id: string; code: string; severity: Severity; message: string; feature_index: number | null; acknowledged_at: string | null; rule_label: string | null;
+  category: string | null; suggestion: string | null; case_id: string; case_no: string; case_status: string; county_code: string; run_at: string;
+  purpose: string; rule_set_version: number | null; run_id: string; extent: Geometry | null;
+}
+export interface ValidationRule {
+  code: string; label: string; category: string; default_severity: Severity; severity: Severity; configurable: boolean; suggestion: string | null;
+  updated_by_username: string | null; updated_at: string;
+}
+export interface RuleSet {
+  rules: ValidationRule[]; currentVersion: number | null; canConfigure: boolean;
+  history: { version: number; changed_by_username: string | null; changed_at: string; rule_code: string | null; from_value: string | null; to_value: string | null; reason: string }[];
+}

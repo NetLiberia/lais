@@ -15,6 +15,9 @@ export interface AuthContext {
   csrfToken: string;
   user: { id: string; username: string; displayName: string; mfaEnrolled: boolean };
   principal: Principal;
+  /** How the request authenticated: a browser session (default) or an ArcMap sync token. */
+  via?: 'session' | 'sync_token';
+  syncTokenId?: string;
 }
 
 declare global {

@@ -55,6 +55,21 @@ const SupervisionReportsPage = named(() => import('./pages/supervisor/Reports'),
 const QualityPage = named(() => import('./pages/supervisor/Reports'), 'QualityPage');
 const EscalationsPage = named(() => import('./pages/supervisor/Escalations'), 'EscalationsPage');
 const NotificationsPage = named(() => import('./pages/NotificationsPage'), 'NotificationsPage');
+// GIS officer workspace.
+const GisDashboard = named(() => import('./pages/gis/GisDashboard'), 'GisDashboard');
+const GisTasks = named(() => import('./pages/gis/GisTasks'), 'GisTasks');
+const GisWorkspace = named(() => import('./pages/gis/Workspace'), 'Workspace');
+const ImportWizard = named(() => import('./pages/gis/ImportWizard'), 'ImportWizard');
+const ArcmapSync = named(() => import('./pages/gis/ArcmapSync'), 'ArcmapSync');
+const GisJobs = named(() => import('./pages/gis/Jobs'), 'GisJobs');
+const ValidationCenter = named(() => import('./pages/gis/ValidationCenter'), 'ValidationCenter');
+const ValidationRules = named(() => import('./pages/gis/ValidationCenter'), 'ValidationRules');
+const GisConflicts = named(() => import('./pages/gis/GisConflicts'), 'GisConflicts');
+const Versions = named(() => import('./pages/gis/Versions'), 'Versions');
+const SubmitWizard = named(() => import('./pages/gis/Submissions'), 'SubmitWizard');
+const SubmissionsPage = named(() => import('./pages/gis/Submissions'), 'SubmissionsPage');
+const ReturnedPage = named(() => import('./pages/gis/Submissions'), 'ReturnedPage');
+const GisReports = named(() => import('./pages/gis/GisReports'), 'GisReports');
 
 const DOCREQUEST_ROLES = ['processor', 'registrar', 'supervisor', 'auditor'];
 
@@ -86,6 +101,7 @@ function Start() {
   if (session.state !== 'active') return <Navigate to="/mfa" replace />;
   if (hasRole('system_admin')) return <Navigate to="/admin" replace />;
   if (hasRole('supervisor')) return <Navigate to="/supervisor" replace />;
+  if (hasRole('gis_officer')) return <Navigate to="/gis" replace />;
   if (hasRole(...INTERNAL_ROLES)) return <Navigate to="/work" replace />;
   if (hasRole('landowner')) return <Navigate to="/me" replace />;
   return <Navigate to="/" replace />;
@@ -161,7 +177,22 @@ export function App() {
       <Route path="/supervisor/quality" element={<RequireSession needs={['reports.supervision']}><QualityPage /></RequireSession>} />
       <Route path="/supervisor/reports" element={<RequireSession needs={['reports.supervision']}><SupervisionReportsPage /></RequireSession>} />
       <Route path="/supervisor/activity" element={<RequireSession needs={['supervision.view']}><ActivityPage /></RequireSession>} />
-      <Route path="/escalations" element={<RequireSession needs={['escalation.view', 'escalation.view_system']}><EscalationsPage /></RequireSession>} />
+      <Route path="/gis" element={<RequireSession needs={['gis.workspace']}><GisDashboard /></RequireSession>} />
+      <Route path="/gis/tasks" element={<RequireSession needs={['task.work']}><GisTasks /></RequireSession>} />
+      <Route path="/gis/workspace" element={<RequireSession needs={['gis.workspace']}><GisWorkspace /></RequireSession>} />
+      <Route path="/gis/import" element={<RequireSession needs={['case.import_geometry']}><ImportWizard /></RequireSession>} />
+      <Route path="/gis/sync" element={<RequireSession needs={['gis.sync_token']}><ArcmapSync /></RequireSession>} />
+      <Route path="/gis/jobs" element={<RequireSession needs={['gis.workspace']}><GisJobs /></RequireSession>} />
+      <Route path="/gis/validation" element={<RequireSession needs={['gis.workspace']}><ValidationCenter /></RequireSession>} />
+      <Route path="/gis/validation/rules" element={<RequireSession needs={['validation.rules_view']}><ValidationRules /></RequireSession>} />
+      <Route path="/gis/conflicts" element={<RequireSession needs={['gis.workspace']}><GisConflicts /></RequireSession>} />
+      <Route path="/gis/versions" element={<RequireSession needs={['gis.workspace']}><Versions /></RequireSession>} />
+      <Route path="/gis/submit" element={<RequireSession needs={['case.submit']}><SubmitWizard /></RequireSession>} />
+      <Route path="/gis/submissions" element={<RequireSession needs={['gis.workspace']}><SubmissionsPage /></RequireSession>} />
+      <Route path="/gis/returned" element={<RequireSession needs={['gis.workspace']}><ReturnedPage /></RequireSession>} />
+      <Route path="/gis/reports" element={<RequireSession needs={['gis.reports']}><GisReports /></RequireSession>} />
+
+      <Route path="/escalations"element={<RequireSession needs={['escalation.view', 'escalation.view_system']}><EscalationsPage /></RequireSession>} />
       <Route path="/notifications" element={<RequireSession><NotificationsPage /></RequireSession>} />
       <Route path="/work/tasks" element={<RequireSession needs={['task.work']}><TasksPage mode="mine" /></RequireSession>} />
 

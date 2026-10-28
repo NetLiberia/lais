@@ -22,6 +22,8 @@ async function asUser(username) {
     await page.getByLabel('Password').fill(PASSWORD);
     await page.getByRole('button', { name: 'Sign in' }).click();
     await page.waitForURL((u) => !u.pathname.startsWith('/login') && !u.pathname.startsWith('/start'), { timeout: 15000 });
+    // GIS officers land on their GIS dashboard; this journey starts from the case list.
+    if (new URL(page.url()).pathname === '/gis') await page.goto(`${BASE}/work`);
   }
   return page;
 }

@@ -282,8 +282,9 @@ button svg, .button svg { vertical-align: -3px; }
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
 .check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.3rem 1rem; }
 .contents { display: contents; }
+/* A link styled as a button: filled like a button (light text on the accent colour), or outlined with .secondary. */
 a.button { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.45rem 0.9rem; border-radius: 8px; border: 1px solid var(--accent);
-  color: var(--accent); text-decoration: none; font-weight: 600; }
+  background: var(--accent); color: var(--accent-text, #fff); text-decoration: none; font-weight: 600; }
 .warn-text { color: #9a6a00; }
 :root[data-theme='dark'] .warn-text { color: #e0b252; }
 
@@ -312,3 +313,31 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .shell, .shell-main, .shell-content { display: block !important; margin: 0 !important; padding: 0 !important; }
   .panel { border: none; box-shadow: none; }
 }
+
+/* GIS officer workspace */
+.stepper { display: flex; flex-wrap: wrap; gap: 0.4rem; list-style: none; padding: 0; margin: 0 0 1rem; }
+.stepper li { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.7rem; border: 1px solid var(--border); border-radius: 999px; font-size: 0.85rem; color: var(--muted); background: var(--surface); }
+.stepper li span { display: inline-grid; place-items: center; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: var(--border); color: var(--text, #1b1f1d); font-size: 0.75rem; font-weight: 600; }
+.stepper li.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.stepper li.active span, .stepper li.done span { background: var(--accent); color: var(--accent-text, #fff); }
+.stepper li.done { color: var(--text, #1b1f1d); }
+.wizard-foot { display: flex; justify-content: space-between; gap: 0.6rem; margin-top: 0.8rem; }
+.sync-indicator { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.8rem; text-decoration: none; border: 1px solid var(--border); }
+.sync-indicator.tone-ok { color: #1e6b45; border-color: #9fd0b5; background: #eaf6ef; }
+.sync-indicator.tone-warn { color: #8a5a00; border-color: #e6c37a; background: #fdf4e1; }
+.sync-indicator.tone-muted { color: var(--muted); }
+.workspace-map { position: relative; }
+.map-coords { position: absolute; bottom: 8px; right: 8px; z-index: 500; background: rgba(255, 255, 255, 0.92); color: #222; padding: 0.2rem 0.5rem; border-radius: 6px; font-size: 0.78rem; font-variant-numeric: tabular-nums; pointer-events: none; }
+.popup-table { border-collapse: collapse; font-size: 0.8rem; margin-top: 0.3rem; }
+.popup-table th { text-align: left; padding-right: 0.5rem; color: #555; font-weight: 500; }
+.check-list { list-style: none; padding: 0; margin: 0.4rem 0; display: grid; gap: 0.35rem; }
+.check-list li { display: flex; gap: 0.4rem; align-items: baseline; flex-wrap: wrap; }
+label.check { display: flex; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
+.small-btn { padding: 0.2rem 0.55rem; font-size: 0.8rem; }
+.inline-form { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; }
+a.button.secondary { background: transparent; color: var(--accent); }
+tr.changed td { background: rgba(242, 184, 75, 0.12); }
+.field { display: flex; flex-direction: column; gap: 0.2rem; }
+@media (max-width: 640px) { .topbar-actions .sync-indicator { display: none; } }
+.split-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 0.8rem; }
+.split-2 > * { min-width: 0; }

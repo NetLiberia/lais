@@ -203,7 +203,7 @@ await check('audit: filter by event and open an event', async () => {
 await check('health: live checks', async () => {
   await nav(admin).getByRole('link', { name: 'System Health' }).click();
   await admin.locator('.health-card', { hasText: 'PostGIS' }).getByText(/PostGIS 3\./).waitFor();
-  await admin.locator('.health-card', { hasText: 'Background jobs' }).getByText('unknown').waitFor();
+  await admin.locator('.health-card', { hasText: 'Background jobs' }).getByText(/GIS jobs run in the API process/).waitFor();
   await shot(admin, 'admin-health');
 });
 
@@ -295,7 +295,7 @@ await check('mobile: dashboard fits a phone and the menu opens', async () => {
 
 await check('GIS officer: no admin navigation, admin pages refuse', async () => {
   const gis = await signIn('gis.mo');
-  await gis.getByRole('heading', { name: 'Cases' }).waitFor();
+  await gis.getByRole('heading', { name: 'GIS Officer Dashboard' }).waitFor();
   if (await nav(gis).getByRole('link', { name: 'User Management' }).count()) throw new Error('GIS officer sees User Management');
   await gis.goto(`${BASE}/admin/users`);
   await gis.getByRole('heading', { name: 'No access' }).waitFor();

@@ -271,6 +271,7 @@ tasksRouter.post('/:id/status', async (req, res) => {
       });
     }
     if (NOTE_REQUIRED.includes(body.to) && (body.note?.length ?? 0) < 5) throw badRequest('Add a note (at least 5 characters)');
+    if (body.to === 'completed' && mine) await assertWorkDone(client, t);
     const sets: string[] = ['status = $2'];
     if (body.to === 'in_progress') sets.push('started_at = coalesce(started_at, now())');
     if (body.to === 'completed') sets.push('completed_at = now()', 'completion_note = $3');
@@ -287,6 +288,72 @@ tasksRouter.post('/:id/status', async (req, res) => {
     await audit(req, t, body.to === 'completed' ? 'complete' : body.to === 'returned' ? 'return' : body.to === 'cancelled' ? 'cancel' : 'status', { from: t.status, to: body.to }, client);
   });
   res.json({ ok: true });
+});
+
+/** Task types whose work is preparing a case's geometry: done only once the case has been (re)submitted. */
+const CASE_SUBMISSION_TASKS: TaskType[] = ['gis_preparation', 'gis_validation_correction', 'correction_resubmission'];
+
+/** A task cannot be marked complete while the workflow step it stands for is still open. */
+async function assertWorkDone(client: pg.PoolClient, t: TaskRow) {
+  if (!t.case_id) return;
+  if (CASE_SUBMISSION_TASKS.includes(t.task_type)) {
+    const { rows: [c] } = await client.query(
+      `SELECT c.status, c.case_no, (SELECT max(created_at) FROM staging.submission s WHERE s.case_id = c.id) AS last_submitted
+         FROM lais.land_case c WHERE c.id = $1`, [t.case_id]);
+    if (c && (['draft', 'returned', 'validating'].includes(c.status) || !c.last_submitted)) {
+      throw conflict(`${c.case_no} has not been submitted since the task was assigned: submit the case before completing the task`);
+    }
+  }
+  if (t.task_type === 'conflict_investigation') {
+    const { rows: [f] } = await client.query(
+      `SELECT 1 FROM lais.conflict_review_event e WHERE e.case_id = $1 AND e.action = 'findings_submitted' AND e.actor_id = $2 LIMIT 1`,
+      [t.case_id, t.assignee_id]);
+    if (!f) throw conflict('Submit your investigation findings on the conflict before completing the task');
+  }
+}
+
+/** An eligible officer of the county takes an unassigned task (recorded as a claim, visible to the supervisor). */
+tasksRouter.post('/:id/claim', async (req, res) => {
+  await tx(async (client) => {
+    const t = await loadTask(client, parseId(req.params.id), true);
+    enforce(req, 'task.work', { countyId: t.county_id }, { entityType: 'task', entityId: t.id, caseId: t.case_id });
+    if (t.status !== 'unassigned' || t.assignee_id) throw conflict('Only an unassigned task can be claimed');
+    await assertEligibleAssignee(client, req.auth!.user.id, t.task_type, t.county_id);
+    await client.query(`UPDATE lais.task SET assignee_id = $2, status = 'assigned' WHERE id = $1`, [t.id, req.auth!.user.id]);
+    await event(client, t.id, req.auth!.user.id, 'claimed', null, req.auth!.user.id, null);
+    await notifyUsers(client, [t.created_by], { category: 'task', title: `Task ${t.task_no} was claimed by ${req.auth!.user.displayName}`, link: `/supervisor/tasks?task=${t.id}` });
+    await audit(req, t, 'claim', {}, client);
+  });
+  res.json({ ok: true });
+});
+
+/** The assignee confirms they have seen the task (it stays assigned until they start it). */
+tasksRouter.post('/:id/acknowledge', async (req, res) => {
+  await tx(async (client) => {
+    const t = await loadTask(client, parseId(req.params.id), true);
+    if (!isAssignee(req, t)) throw new HttpError(403, 'Only the assignee can acknowledge a task');
+    if (!OPEN.includes(t.status)) throw conflict(`A ${t.status} task cannot be acknowledged`);
+    await event(client, t.id, req.auth!.user.id, 'acknowledged', null, null, null);
+    await notifyUsers(client, [t.created_by], { category: 'task', title: `Task ${t.task_no} was acknowledged`, link: `/supervisor/tasks?task=${t.id}` });
+    await audit(req, t, 'acknowledge', {}, client);
+  });
+  res.json({ ok: true });
+});
+
+const clarificationBody = z.object({ question: z.string().trim().min(5).max(2000) });
+
+/** The assignee asks the supervisor who created the task for clarification. */
+tasksRouter.post('/:id/clarification', async (req, res) => {
+  const { question } = clarificationBody.parse(req.body);
+  await tx(async (client) => {
+    const t = await loadTask(client, parseId(req.params.id), true);
+    if (!isAssignee(req, t)) throw new HttpError(403, 'Only the assignee can request clarification');
+    if (!OPEN.includes(t.status)) throw conflict(`A ${t.status} task is closed`);
+    await event(client, t.id, req.auth!.user.id, 'clarification_requested', null, null, question);
+    await notifyUsers(client, [t.created_by], { category: 'task', title: `Clarification requested on task ${t.task_no}`, body: question.slice(0, 200), link: `/supervisor/tasks?task=${t.id}` });
+    await audit(req, t, 'clarification_requested', {}, client);
+  });
+  res.status(201).json({ ok: true });
 });
 
 const updateBody = z.object({
@@ -354,3 +421,4 @@ documentBody('POST /tasks/{id}/status', statusBody);
 documentBody('PATCH /tasks/{id}', updateBody);
 documentBody('POST /tasks/{id}/comments', commentBody);
 documentBody('POST /tasks/{id}/follow-up', followUpBody);
+documentBody('POST /tasks/{id}/clarification', clarificationBody);

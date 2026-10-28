@@ -5,11 +5,13 @@ import {
   Activity, AlarmClock, AlertOctagon, BarChart3, Bell, BookOpen, ChevronsLeft, ChevronsRight, ClipboardCheck, ClipboardList, FileStack, FileText,
   FolderKanban, HardDrive, HelpCircle, History, KeyRound, Layers, LayoutDashboard, ListChecks, LogOut, Map, MapPinned, Menu, Moon, RefreshCw,
   ScrollText, Search, Settings, ShieldCheck, Siren, Sun, UserCircle2, Users, X,
+  Upload, PlugZap, GitCompare, Send, Undo2, CircleCheckBig, Cog, Gauge, SlidersHorizontal,
 } from 'lucide-react';
 import { api, ROLE_LABELS } from '../api';
 import { useAuth } from '../auth';
 import { fmtDateTime } from '../components/kit';
 import { ScopeSelector, SupervisionScopeProvider } from '../pages/supervisor/common';
+import { SyncIndicator } from '../pages/gis/common';
 
 /** Sidebar entries. `needs` lists capabilities; an entry is shown if the account has any of them. */
 interface NavItem { to: string; label: string; icon: ReactNode; needs: string[]; end?: boolean; hideIf?: string[] }
@@ -41,11 +43,31 @@ const NAV: { heading: string; items: NavItem[] }[] = [
       { to: '/admin/parcels', label: 'Parcels & GIS', icon: <Map size={18} />, needs: ['dashboard.view'] },
       { to: '/admin/conflicts', label: 'Spatial Conflicts', icon: <AlertOctagon size={18} />, needs: ['dashboard.view'] },
       { to: '/admin/gis-sync', label: 'GIS Synchronization', icon: <RefreshCw size={18} />, needs: ['gis.sync.read'] },
+      { to: '/gis/validation/rules', label: 'Validation Rules', icon: <SlidersHorizontal size={18} />, needs: ['validation.configure'] },
       { to: '/admin/document-categories', label: 'Document Categories', icon: <FileStack size={18} />, needs: ['system.configure'] },
       { to: '/admin/reports', label: 'Reports & Analytics', icon: <BarChart3 size={18} />, needs: ['reports.export'] },
       { to: '/admin/audit', label: 'Audit & Security Logs', icon: <ScrollText size={18} />, needs: ['audit.view_technical', 'audit.view_all'] },
       { to: '/admin/health', label: 'System Health', icon: <Activity size={18} />, needs: ['system.health'] },
       { to: '/admin/settings', label: 'Settings', icon: <Settings size={18} />, needs: ['system.configure'] },
+    ],
+  },
+  {
+    // GIS officers: preparing spatial data in staging. Supervisors use their own GIS quality review.
+    heading: 'GIS workspace',
+    items: [
+      { to: '/gis', label: 'GIS Dashboard', icon: <Gauge size={18} />, needs: ['gis.sync_token'], end: true },
+      { to: '/gis/tasks', label: 'My GIS Tasks', icon: <ListChecks size={18} />, needs: ['gis.sync_token'] },
+      { to: '/gis/workspace', label: 'Parcel Workspace', icon: <Map size={18} />, needs: ['gis.sync_token'] },
+      { to: '/gis/import', label: 'Data Import Center', icon: <Upload size={18} />, needs: ['gis.sync_token'] },
+      { to: '/gis/sync', label: 'ArcMap Sync', icon: <PlugZap size={18} />, needs: ['gis.sync_token'] },
+      { to: '/gis/validation', label: 'Validation Center', icon: <CircleCheckBig size={18} />, needs: ['gis.sync_token'], end: true },
+      { to: '/gis/conflicts', label: 'Conflict Investigation', icon: <AlertOctagon size={18} />, needs: ['conflict.investigate'] },
+      { to: '/gis/versions', label: 'Versions & Compare', icon: <GitCompare size={18} />, needs: ['gis.sync_token'] },
+      { to: '/gis/submit', label: 'Submit to Supervisor', icon: <Send size={18} />, needs: ['gis.sync_token'] },
+      { to: '/gis/submissions', label: 'Submissions', icon: <FolderKanban size={18} />, needs: ['gis.sync_token'] },
+      { to: '/gis/returned', label: 'Returned Submissions', icon: <Undo2 size={18} />, needs: ['gis.sync_token'] },
+      { to: '/gis/jobs', label: 'Processing Jobs', icon: <Cog size={18} />, needs: ['gis.sync_token'] },
+      { to: '/gis/reports', label: 'GIS Reports', icon: <BarChart3 size={18} />, needs: ['gis.sync_token'] },
     ],
   },
   {
@@ -55,7 +77,7 @@ const NAV: { heading: string; items: NavItem[] }[] = [
       { to: '/work/document-requests', label: 'Document requests', icon: <FileText size={18} />, needs: ['docrequest.view'] },
       { to: '/work/parties', label: 'Parties', icon: <Users size={18} />, needs: ['party.search'] },
       { to: '/work/audit', label: 'Audit trail', icon: <ShieldCheck size={18} />, needs: ['audit.view_all'] },
-      { to: '/work/tasks', label: 'My tasks', icon: <ListChecks size={18} />, needs: ['task.work'], hideIf: ['supervision.view'] },
+      { to: '/work/tasks', label: 'My tasks', icon: <ListChecks size={18} />, needs: ['task.work'], hideIf: ['supervision.view', 'gis.sync_token'] },
       { to: '/escalations', label: 'Escalations', icon: <Siren size={18} />, needs: ['escalation.view', 'escalation.view_system'], hideIf: ['supervision.view'] },
     ],
   },
@@ -88,6 +110,7 @@ function Breadcrumbs() {
   const { pathname } = useLocation();
   const section = pathname.startsWith('/admin') ? { to: '/admin', label: 'Administration' }
     : pathname.startsWith('/supervisor') || pathname.startsWith('/escalations') ? { to: '/supervisor', label: 'Supervision' }
+    : pathname.startsWith('/gis') ? { to: '/gis', label: 'GIS workspace' }
     : pathname.startsWith('/work') ? { to: '/work', label: 'Land administration' } : null;
   const leaf = CRUMBS.find(([re]) => re.test(pathname))?.[1] ?? (pathname === '/admin' ? 'Dashboard' : pathname === '/work' ? 'Cases' : null);
   return (
@@ -308,6 +331,7 @@ function ShellLayout({ children }: { children: ReactNode }) {
           <GlobalSearch />
           <div className="topbar-actions">
             {can('supervision.view') ? <ScopeSelector /> : <ScopeIndicator />}
+            <SyncIndicator compact />
             <NotificationCenter />
             <button className="icon-btn" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={toggleTheme}>
               {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}

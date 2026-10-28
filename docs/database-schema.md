@@ -76,10 +76,16 @@ The append-only tables share the trigger function `lais.forbid_history_change()`
 
 | Table | Purpose |
 |---|---|
-| `batch` | One import: the file name, its SHA-256, the declared CRS, the feature count and the status. A new import supersedes the earlier one. |
-| `feature` | Imported features: the raw and normalised geometry, the result of structural checks, properties, any exclusion and its reason, and the parcel it became when published. |
-| `validation_run` | A validation of a batch, with error and warning counts. |
+| `batch` | A numbered **working version** of a case's geometry (`version_no`, unique per case): the file name, its SHA-256, the declared CRS, the feature count, the status (active, superseded or published), `source_kind` (upload, arcmap or correction), the job that created it, `parent_batch_id` and `change_reason`. A new version supersedes the earlier one, which is kept. |
+| `feature` | Imported features: the raw and normalised geometry, the result of structural checks, properties, any exclusion and its reason, and the parcel it became when published. Features of a submitted version are frozen (`feature_submitted_protect`), except for the published-parcel link. |
+| `import_job` | A GIS processing job (`GIS-000001`), migration 011: an import, ArcMap sync or attribute correction. Records the status, source (name, format, layer, size, SHA-256), CRS detected and declared with any exception reason, adapter version, dataset, export ID and manifest, field mapping, record counts, warnings, rejections, error summary, the version created and `retry_of`. CHECKs: a completed job has a version, and a declared CRS without detection has a reason. One completed job per case and export ID. |
+| `submission` | An immutable submission snapshot (`SUB-000001`): the version and validation run submitted, the submitter, the outcome, a summary, the change explanation, outstanding warnings and their acknowledgement, the snapshot hash, the feature count and `previous_submission_id`. Append-only. |
+| `validation_rule` | The validation rules: category, default and current severity, `configurable`, fix guidance. A CHECK keeps non-configurable (safety) rules at their default. |
+| `rule_set_version` | Append-only history of rule changes (who, when, rule, from, to, reason). Its latest version is the current rule set. |
+| `validation_run` | A validation of a batch, with error and warning counts, the rule-set version applied and the county boundary status at the time. |
 | `finding` | The findings of a validation run, with any registrar acknowledgement. |
+
+`lais.sync_token` (migration 011) holds ArcMap sync tokens: the owner, a label, the SHA-256 of the token (never the token), the last four characters, expiry, last use and revocation. `lais.task_event` and `lais.conflict_review_event` gained the actions `acknowledged`, `clarification_requested`, `claimed`, `findings_submitted` and `revalidated`.
 
 Nothing in `staging` is authoritative. Geometry reaches `lais.parcel_version` only through the publication of an approved case.
 
@@ -100,6 +106,7 @@ Nothing in `staging` is authoritative. Geometry reaches `lais.parcel_version` on
 | `parcel_version_protect`, `rrr_protect` | Published history cannot be edited. |
 | `document_request_transition`, `document_request_item_protect` | Request workflow, and release items are frozen once decided. |
 | `event_chain`, `event_no_update` | The audit chain, and immutability of audit events. |
+| `feature_submitted_protect`, `submission_append_only`, `rule_set_version_append_only` | Submitted geometry snapshots, submissions and the rule history cannot be changed. |
 
 ## Row-level security
 

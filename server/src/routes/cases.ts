@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { Router } from 'express';
+import { Router, type Request } from 'express';
+import type pg from 'pg';
 import multer from 'multer';
 import { z } from 'zod';
 import { config, isTest } from '../config.js';
@@ -12,13 +13,14 @@ import { enforce } from '../authz/enforce.js';
 import { authorize, scopeFor, type Action } from '../authz/policy.js';
 import { CASE_STATUSES, SPATIAL_CASE_TYPES } from '../authz/workflow.js';
 import { reviewMode } from '../services/supervision.js';
-import { caseContext, getCase, inCaseTx, recordEvent, setStatus } from '../services/cases.js';
+import { copyVersion, isSubmitted, recordSubmission, stageFeatures } from '../services/staging.js';
+import { caseContext, getCase, inCaseTx, recordEvent, setStatus, type CaseRow } from '../services/cases.js';
 import { ACCEPTED_SRIDS, extractFeatures, FEATURE_LIMITS } from '../services/geojson.js';
 import { computeSnapshot } from '../services/snapshot.js';
 import { evaluateCase, latestRun, persistRun, PROVISIONAL_UPI_PATTERN } from '../services/validation.js';
 import { publishApprovedCase } from '../services/publication.js';
 import { OWNERSHIP_TYPES } from '../services/shares.js';
-import { notifyUsers } from '../services/notify.js';
+import { notifyRoles, notifyUsers } from '../services/notify.js';
 import { detectDocumentType } from '../services/files.js';
 import { csvCell } from '../csv.js';
 import { documentBody, documentQuery } from '../openapi.js';
@@ -408,51 +410,30 @@ casesRouter.post('/:id/geometry', geojsonUpload.single('file'), async (req, res)
 
   const result = await inCaseTx(req, 'case.import_geometry', async (client, cs) => {
     const features = extractFeatures(req.file!.buffer.toString('utf8'), srid, FEATURE_LIMITS[cs.case_type]);
-
-    await client.query(`UPDATE staging.batch SET status = 'superseded' WHERE case_id = $1 AND status = 'active'`, [cs.id]);
-    const { rows: [batch] } = await client.query(
-      `INSERT INTO staging.batch (case_id, uploaded_by, source_filename, file_sha256, declared_srid, feature_count, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'active') RETURNING id`,
-      [cs.id, req.auth!.user.id, req.file!.originalname.slice(0, 200), createHash('sha256').update(req.file!.buffer).digest('hex'), srid, features.length],
+    const sha256 = createHash('sha256').update(req.file!.buffer).digest('hex');
+    // Quick imports from the case page are recorded as import jobs too, so the job history is complete.
+    const { rows: [job] } = await client.query(
+      `INSERT INTO staging.import_job (kind, status, county_id, case_id, initiated_by, purpose, source_name, source_format, source_size_bytes,
+                                       source_sha256, source_crs_detected, source_crs_declared, crs_exception_reason, records_received, started_at)
+       VALUES ('import', 'running', $1, $2, $3, 'Case page import', $4, 'geojson', $5, $6, NULL, $7, 'Declared by the officer on the case page (GeoJSON has no CRS metadata)', $8, now())
+       RETURNING id, job_no`,
+      [cs.county_id, cs.id, req.auth!.user.id, req.file!.originalname.slice(0, 200), req.file!.size, sha256, srid, features.length],
     );
-
-    const problems: (string | null)[] = [];
-    for (const [index, { geometry, properties }] of features.entries()) {
-      const label = features.length > 1 ? `Feature ${index + 1}: ` : '';
-      let structural;
-      try {
-        ({ rows: [structural] } = await client.query(
-          `WITH g AS (SELECT ST_Force2D(ST_SetSRID(ST_GeomFromGeoJSON($1), $2)) AS gi)
-           SELECT gi, GeometryType(gi) AS gtype, ST_IsEmpty(gi) AS empty, ST_IsValid(gi) AS valid, ST_IsValidReason(gi) AS reason,
-                  ST_XMin(gi) AS xmin, ST_XMax(gi) AS xmax, ST_YMin(gi) AS ymin, ST_YMax(gi) AS ymax FROM g`,
-          [JSON.stringify(geometry), srid],
-        ));
-      } catch {
-        throw badRequest(`${label}The geometry could not be read as GeoJSON`);
-      }
-      let problem: string | null = null;
-      if (!['POLYGON', 'MULTIPOLYGON'].includes(structural.gtype)) problem = `Expected a Polygon or MultiPolygon, got ${structural.gtype}`;
-      else if (structural.empty) problem = 'The geometry is empty';
-      else if (!structural.valid) problem = structural.reason;
-      else if (srid === 4326 && (structural.xmin < -180 || structural.xmax > 180 || structural.ymin < -90 || structural.ymax > 90)) {
-        problem = 'Coordinates are outside the valid longitude/latitude range for EPSG:4326; check the declared CRS';
-      }
-      problems.push(problem && `${label}${problem}`);
-
-      await client.query(
-        `INSERT INTO staging.feature (batch_id, feature_index, geom_input, geom, structural_ok, structural_message, properties)
-         VALUES ($1, $2, $3::geometry, CASE WHEN $4 THEN ST_Multi(ST_Transform($3::geometry, 4326)) END, $4, $5, $6)`,
-        [batch.id, index, structural.gi, problem === null, problem, JSON.stringify(properties)],
-      );
-    }
-
-    const invalid = problems.filter((p): p is string => p !== null);
-    await recordEvent(client, cs.id, req.auth!.user.id, 'import_geometry', `${req.file!.originalname} (EPSG:${srid}, ${features.length} feature(s))`);
+    const staged = await stageFeatures(client, cs, {
+      features, srid, sourceName: req.file!.originalname, sha256, userId: req.auth!.user.id, sourceKind: 'upload', jobId: job.id,
+    });
+    const invalid = staged.problems;
+    await client.query(
+      `UPDATE staging.import_job SET status = $2, batch_id = $3, records_accepted = $4, records_rejected = 0, records_inserted = $4, finished_at = now(),
+              warnings = $5 WHERE id = $1`,
+      [job.id, invalid.length ? 'completed_with_warnings' : 'completed', staged.batchId, features.length, JSON.stringify(invalid)],
+    );
+    await recordEvent(client, cs.id, req.auth!.user.id, 'import_geometry', `${req.file!.originalname} (EPSG:${srid}, ${features.length} feature(s)) as version ${staged.versionNo}`);
     await writeAudit(req, {
-      action: 'staging.import', outcome: invalid.length ? 'failure' : 'success', entityType: 'staging_batch', entityId: batch.id, caseId: cs.id, countyId: cs.county_id,
-      detail: { srid, filename: req.file!.originalname, featureCount: features.length, structuralProblems: invalid },
+      action: 'staging.import', outcome: invalid.length ? 'failure' : 'success', entityType: 'staging_batch', entityId: staged.batchId, caseId: cs.id, countyId: cs.county_id,
+      detail: { srid, filename: req.file!.originalname, featureCount: features.length, structuralProblems: invalid, jobNo: job.job_no, version: staged.versionNo },
     }, client);
-    return { batchId: batch.id, featureCount: features.length, structuralOk: invalid.length === 0, problem: invalid.join('; ') || null };
+    return { batchId: staged.batchId, versionNo: staged.versionNo, jobNo: job.job_no, featureCount: features.length, structuralOk: invalid.length === 0, problem: invalid.join('; ') || null };
   });
   res.status(201).json(result);
 });
@@ -472,14 +453,23 @@ casesRouter.post('/:id/features/:index/exclusion', async (req, res) => {
   if (body.excluded && (!body.reason || body.reason.length < 5)) throw badRequest('Give a reason for excluding the feature (5+ characters)');
   await inCaseTx(req, 'case.import_geometry', async (client, cs) => {
     if (cs.case_type !== 'migration') throw badRequest('Only features of a migration batch can be excluded');
-    const { rowCount } = await client.query(
-      `UPDATE staging.feature f SET excluded = $3, exclusion_reason = $4
-         FROM staging.batch b
-        WHERE b.id = f.batch_id AND b.case_id = $1 AND b.status = 'active' AND f.feature_index = $2`,
-      [cs.id, index, body.excluded, body.excluded ? body.reason : null],
+    const { rows: [active] } = await client.query(
+      `SELECT b.id FROM staging.batch b JOIN staging.feature f ON f.batch_id = b.id AND f.feature_index = $2
+        WHERE b.case_id = $1 AND b.status = 'active'`,
+      [cs.id, index],
     );
-    if (!rowCount) throw notFound('No such feature in the active batch');
+    if (!active) throw notFound('No such feature in the active batch');
     const note = body.excluded ? `Feature ${index + 1} excluded: ${body.reason}` : `Feature ${index + 1} included again`;
+    if (await isSubmitted(client, active.id)) {
+      // The active version was submitted and is frozen: the change goes into a new working version.
+      await copyVersion(client, cs, active.id, req.auth!.user.id, note, (f) => (f.feature_index === index
+        ? { excluded: body.excluded, exclusion_reason: body.excluded ? body.reason! : null } : null));
+    } else {
+      await client.query(
+        'UPDATE staging.feature SET excluded = $3, exclusion_reason = $4 WHERE batch_id = $1 AND feature_index = $2',
+        [active.id, index, body.excluded, body.excluded ? body.reason : null],
+      );
+    }
     await recordEvent(client, cs.id, req.auth!.user.id, 'update_attributes', note);
     await writeAudit(req, { action: 'staging.feature_exclusion', outcome: 'success', entityType: 'case', entityId: cs.id, caseId: cs.id, countyId: cs.county_id, detail: { featureIndex: index, excluded: body.excluded, reason: body.reason ?? null } }, client);
   });
@@ -687,25 +677,39 @@ casesRouter.post('/:id/validate', async (req, res) => {
   res.json(result);
 });
 
-casesRouter.post('/:id/submit', async (req, res) => {
-  const result = await inCaseTx(req, 'case.submit', async (client, cs) => {
-    const actor = req.auth!.user.id;
-    const validating = await setStatus(client, cs, 'validating', actor, 'submit');
-    const evaluation = await evaluateCase(client, validating);
-    const runId = await persistRun(client, validating, evaluation, actor, 'submission');
-    const errors = evaluation.findings.filter((f) => f.severity === 'error');
-    const next = errors.length > 0
-      ? await setStatus(client, validating, 'returned', null, 'validation_failed', `${errors.length} blocking error(s)`)
-      : await setStatus(client, validating, 'under_review', null, 'validation_passed');
-    if (next.status === 'returned' && cs.created_by !== actor) {
-      await notifyUsers(client, [cs.created_by], { category: 'workflow', title: `${cs.case_no} was returned by validation`, body: `${errors.length} blocking error(s) to correct`, link: `/work/cases/${cs.id}` });
-    }
-    await writeAudit(req, {
-      action: 'case.submit', outcome: 'success', entityType: 'case', entityId: cs.id, caseId: cs.id, countyId: cs.county_id,
-      detail: { runId, result: next.status, errors: errors.length, warnings: evaluation.findings.length - errors.length },
-    }, client);
-    return { status: next.status, findings: evaluation.findings };
+/**
+ * Submits a case: full validation, then under review (no blocking errors) or returned. Every submission is
+ * recorded as an immutable snapshot of the exact version submitted, linked to the previous submission.
+ */
+export async function submitCase(req: Request, client: pg.PoolClient, cs: CaseRow, details: {
+  summary?: string | null; changeExplanation?: string | null; outstandingWarnings?: string | null; warningsAcknowledged?: boolean;
+} = {}) {
+  const actor = req.auth!.user.id;
+  const validating = await setStatus(client, cs, 'validating', actor, 'submit', details.summary ?? null);
+  const evaluation = await evaluateCase(client, validating);
+  const runId = await persistRun(client, validating, evaluation, actor, 'submission');
+  const errors = evaluation.findings.filter((f) => f.severity === 'error');
+  const next = errors.length > 0
+    ? await setStatus(client, validating, 'returned', null, 'validation_failed', `${errors.length} blocking error(s)`)
+    : await setStatus(client, validating, 'under_review', null, 'validation_passed');
+  const submission = await recordSubmission(client, {
+    caseId: cs.id, runId, userId: actor, outcome: next.status === 'returned' ? 'returned_by_validation' : 'under_review', ...details,
   });
+  if (next.status === 'returned' && cs.created_by !== actor) {
+    await notifyUsers(client, [cs.created_by], { category: 'workflow', title: `${cs.case_no} was returned by validation`, body: `${errors.length} blocking error(s) to correct`, link: `/work/cases/${cs.id}` });
+  }
+  if (next.status === 'under_review' && (SPATIAL_CASE_TYPES as readonly string[]).includes(cs.case_type)) {
+    await notifyRoles(client, ['supervisor'], { category: 'review', title: `${cs.case_no} submitted for quality review (${submission.submission_no})`, link: `/supervisor/gis-review/${cs.id}` }, cs.county_id);
+  }
+  await writeAudit(req, {
+    action: 'case.submit', outcome: 'success', entityType: 'case', entityId: cs.id, caseId: cs.id, countyId: cs.county_id,
+    detail: { runId, result: next.status, errors: errors.length, warnings: evaluation.findings.length - errors.length, submissionNo: submission.submission_no },
+  }, client);
+  return { status: next.status, findings: evaluation.findings, submissionNo: submission.submission_no, submissionId: submission.id };
+}
+
+casesRouter.post('/:id/submit', async (req, res) => {
+  const result = await inCaseTx(req, 'case.submit', (client, cs) => submitCase(req, client, cs));
   res.json(result);
 });
 

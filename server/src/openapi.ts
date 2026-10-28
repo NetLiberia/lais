@@ -35,6 +35,7 @@ export const NO_BODY = new Set([
   'POST /auth/logout', 'POST /auth/mfa/enroll/start',
   'POST /cases/{id}/rights/copy-from-source', 'DELETE /cases/{id}/rights/{rightId}',
   'POST /cases/{id}/validate', 'POST /cases/{id}/submit', 'POST /cases/{id}/publish',
+  'POST /tasks/{id}/claim', 'POST /tasks/{id}/acknowledge', 'POST /gis/jobs/{id}/retry', 'POST /gis/jobs/{id}/cancel', 'DELETE /gis/sync/tokens/{tokenId}',
   'POST /notifications/{id}/read', 'POST /notifications/read-all', 'POST /me/document-requests/{id}/withdraw',
 ]);
 
@@ -201,6 +202,52 @@ export const SUMMARIES: Record<string, string> = {
   'POST /tasks/{id}/comments': 'Comment on a task, optionally with a reference.',
   'POST /tasks/{id}/follow-up': 'Send the assignee a follow-up.',
   // Escalations
+  'POST /tasks/{id}/claim': 'Claim an unassigned task you are eligible for in your county (recorded and visible to the supervisor).',
+  'POST /tasks/{id}/acknowledge': 'Acknowledge a task assigned to you.',
+  'POST /tasks/{id}/clarification': 'Ask the supervisor who created the task for clarification.',
+  'GET /gis/summary': 'GIS officer dashboard: twelve indicators, recent jobs, your open tasks and your last ArcMap sync.',
+  'GET /gis/tasks': 'Your GIS tasks and unassigned tasks you may claim in your counties.',
+  'GET /gis/cases': 'Spatial cases in your counties with their working version and latest validation counts.',
+  'GET /gis/workspace/layers': 'Map layers: approved reference parcels, working and submitted staging, invalid geometry, overlaps, duplicate identifiers, county boundary.',
+  'GET /gis/workspace/search': 'Find a parcel (UPI or legacy reference) or case by identifier, with its extent for the map.',
+  'GET /gis/imports/options': 'Supported and unsupported formats, accepted CRS, target fields and limits for the import wizard.',
+  'POST /gis/uploads': 'Upload and inspect a GIS file (GeoJSON, zipped shapefile, CSV with WKT, ArcMap package). Nothing is staged.',
+  'POST /gis/imports/preview': 'Preview an import: CRS decision, field mapping, accepted and rejected records, extent. Nothing is staged.',
+  'POST /gis/imports': 'Confirm an import: queues a job that stages a new working version (202; poll the job).',
+  'GET /gis/jobs': 'GIS processing jobs (imports, ArcMap syncs, corrections) in your counties, with counts by status.',
+  'GET /gis/jobs/{id}': 'A job with its warnings, rejected records and a step-by-step diagnostic.',
+  'GET /gis/jobs/{id}/report.csv': 'The error report of a job (rejected records and warnings) as CSV.',
+  'POST /gis/jobs/{id}/retry': 'Retry a failed or cancelled job you started, as a new job with the same settings.',
+  'POST /gis/jobs/{id}/cancel': 'Cancel a queued job you started.',
+  'GET /gis/sync/tokens': 'Your ArcMap sync tokens (hints only, never the tokens).',
+  'POST /gis/sync/tokens': 'Create a personal ArcMap sync token; it is shown once and only its hash is stored.',
+  'DELETE /gis/sync/tokens/{tokenId}': 'Revoke one of your ArcMap sync tokens.',
+  'GET /gis/sync/status': 'ArcMap sync status as observed by the server (last contact, recent sync jobs). Not a live connection indicator.',
+  'GET /gis/sync/diagnostic': 'ArcMap sync configuration checks.',
+  'GET /gis/sync/adapter.zip': 'Download the ArcMap adapter (Python toolbox and command line). Contains no tokens.',
+  'GET /gis/cases/{id}/versions': "Working versions of a case's geometry, with their source job and submissions.",
+  'GET /gis/cases/{id}/versions/{versionNo}/features': 'The features of one version as GeoJSON (EPSG:4326 for display).',
+  'GET /gis/cases/{id}/versions/compare': 'Compare two versions feature by feature, with both geometries for a map overlay.',
+  'POST /gis/cases/{id}/corrections': 'Correct feature attributes: creates a new working version (earlier versions stay unchanged).',
+  'GET /gis/cases/{id}/submission-check': 'The submission checklist: geometry, CRS, blocking errors, warnings, previous submission and return reasons.',
+  'POST /gis/cases/{id}/submit': 'Submit a spatial case to the supervisor with the checklist confirmed. Refused (409) while blocking errors remain.',
+  'GET /gis/submissions': 'Submissions with their snapshot and derived status.',
+  'GET /gis/submissions/{id}': 'A submission: snapshot integrity check, findings at submission and later reviews.',
+  'GET /gis/returned': 'Spatial cases returned for correction, with the reasons and instructions.',
+  'GET /gis/conflicts': 'Spatial conflicts in your counties with their derived review status.',
+  'GET /gis/conflicts/{findingId}': 'A conflict with its occurrences, review events, tasks, escalations and map evidence.',
+  'POST /gis/conflicts/{findingId}/actions': 'Investigate a conflict: add a note, re-run the checks, or submit findings. Nothing resolves or deletes it.',
+  'GET /gis/validation': 'Validation center: findings of the latest run of each spatial case, with filters and feature extents.',
+  'GET /gis/validation.csv': 'Validation findings as CSV.',
+  'GET /gis/validation/rules': 'Validation rules, their current severities and the versioned change history.',
+  'PATCH /gis/validation/rules/{code}': 'Change the severity of a configurable rule (administrators; a reason is required and a new rule-set version recorded).',
+  'GET /gis/reports': 'The available GIS reports.',
+  'GET /gis/reports/{key}': 'Generate a GIS report as JSON.',
+  'GET /gis/reports/{key}.csv': 'Generate a GIS report as CSV.',
+  'GET /gis/reports/{key}.pdf': 'Generate a GIS report as PDF.',
+  'GET /gis/arcmap/ping': 'ArcMap adapter connection test: the token owner and the counties it can sync.',
+  'POST /gis/arcmap/packages': 'Upload an ArcMap export package for a case; it becomes an import job (a resent export returns the earlier job).',
+  'GET /gis/arcmap/jobs/{id}': 'Status of a sync job started with your token.',
   'GET /escalations': 'Escalations in your counties (administrators: those routed to system administration).',
   'GET /escalations/{id}': 'An escalation with its history and the actions you may take.',
   'POST /escalations': 'Raise an escalation with evidence; it is routed to the responsible role.',
@@ -214,11 +261,11 @@ export const SUMMARIES: Record<string, string> = {
 };
 
 /** Routes that take multipart/form-data uploads. */
-export const MULTIPART = new Set(['POST /cases/{id}/geometry', 'POST /cases/{id}/documents', 'POST /admin/counties/{id}/boundary']);
+export const MULTIPART = new Set(['POST /cases/{id}/geometry', 'POST /cases/{id}/documents', 'POST /admin/counties/{id}/boundary', 'POST /gis/uploads', 'POST /gis/arcmap/packages']);
 /** Auth routes that work without a session. */
 const NO_SESSION = new Set(['POST /auth/login', 'POST /auth/token/inspect', 'POST /auth/token/complete', 'GET /auth/session']);
 
-export interface Mount { path: string; router: Router; access: 'public' | 'internal'; tag: string }
+export interface Mount { path: string; router: Router; access: 'public' | 'internal' | 'sync'; tag: string }
 
 /** Lists every route of the mounted routers as `METHOD /path` with OpenAPI-style `{param}` segments. */
 export function listRoutes(mounts: Mount[]) {
@@ -251,7 +298,8 @@ export function buildOpenApi(mounts: Mount[]) {
       200: { description: 'Success' },
       400: { $ref: '#/components/responses/Invalid' },
     };
-    if (needsSession) {
+    const bearer = r.mount.access === 'sync';
+    if (needsSession || bearer) {
       responses[401] = { $ref: '#/components/responses/Unauthenticated' };
       responses[403] = { $ref: '#/components/responses/Forbidden' };
     }
@@ -264,7 +312,7 @@ export function buildOpenApi(mounts: Mount[]) {
       operationId: r.key.replace(/[^A-Za-z0-9]+/g, '_').replace(/_$/, ''),
       ...(params.length ? { parameters: params } : {}),
       ...(body ? { requestBody: body } : {}),
-      security: needsSession ? (writes ? [{ session: [], csrf: [] }] : [{ session: [] }]) : [],
+      security: bearer ? [{ syncToken: [] }] : needsSession ? (writes ? [{ session: [], csrf: [] }] : [{ session: [] }]) : [],
       responses,
     };
   }
@@ -283,6 +331,7 @@ export function buildOpenApi(mounts: Mount[]) {
     components: {
       securitySchemes: {
         session: { type: 'apiKey', in: 'cookie', name: 'lais_sid', description: 'Server-side session (HttpOnly, SameSite=Strict).' },
+        syncToken: { type: 'http', scheme: 'bearer', description: 'Personal ArcMap sync token (lais_sync_...), created under GIS > ArcMap sync. Valid only for /gis/arcmap.' },
         csrf: { type: 'apiKey', in: 'header', name: 'X-CSRF-Token', description: 'Required on every state-changing request; returned by GET /auth/session.' },
       },
       responses: {

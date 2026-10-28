@@ -19,7 +19,8 @@ export function stubApi(routes: Record<string, Handler>) {
     const url = new URL(String(input), 'http://localhost');
     const method = init?.method ?? 'GET';
     const path = url.pathname.replace(/^\/api/, '');
-    calls.push({ method, path: path + url.search, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    // JSON bodies are parsed; uploads (FormData) are recorded as they are.
+    calls.push({ method, path: path + url.search, body: typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body });
     const handler = routes[`${method} ${path}`] ?? (method === 'GET' ? routes[path] : undefined);
     if (handler === undefined) throw new Error(`Unexpected request in test: ${method} ${path}`);
     try {

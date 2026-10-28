@@ -37,6 +37,47 @@ Supervisors can be assigned to one county or nationally. Integration tests check
 
 The record inspector in GIS review leaves out imported attributes whose names suggest personal data (names, holders, contacts, identity numbers). The work queue shows a count of proposed holders, never their names.
 
+## Limits on the GIS officer
+
+GIS officers prepare spatial data in staging, in their own counties. Integration tests (`server/test/integration/gis.test.ts`) check each limit.
+
+| The GIS officer cannot | How it is enforced |
+|---|---|
+| Approve, reject or publish | No GIS role in `case.decide` or `case.publish`. Submission (`case.submit`) only starts review. |
+| Change ownership | No `case.edit_rights`. Attribute corrections change staging features only, never rights or published parcels. |
+| Delete or rewrite a version | No route deletes a version: imports, syncs and corrections always add one. A trigger freezes the features of a submitted version, and submissions are append-only. |
+| Submit with blocking errors | `POST /gis/cases/{id}/submit` re-validates and refuses with 409. No exception policy exists. |
+| Weaken validation | Rule severities are changed only by administrators (`validation.configure`). Safety rules are fixed by a database CHECK, and every change is versioned and audited. |
+| Resolve, dismiss or delete a conflict | Investigation adds notes, re-runs checks (only while the case is editable) and submits findings. Review events are append-only. |
+| Work in another county | `gis.workspace`, `case.import_geometry`, `conflict.investigate` and `gis.reports` are county-scoped, and jobs, layers and submissions are filtered by grant. An upload can be used only by the officer who sent it. |
+| Alter audit history | `audit.event` is append-only and hash-chained. |
+
+## GIS data and the ArcMap adapter
+
+- **Uploads are untrusted input.**
+  - Files are read in memory, archive member names are checked, and only an allow-list of extensions is accepted.
+  - Sizes, entries and features are limited.
+  - Nothing in an upload is executed: no scripts, macros or tools.
+  - Attribute values are kept as scalar text or numbers, limited to 100 per feature, and shown escaped in the interface.
+  - WKT is parsed by PostGIS in a parameterised query.
+  - Uploads are stored under random names outside the web root and deleted after the retention period.
+- **No silent CRS assignment.** Unknown CRS means the officer must declare it, give a reason (stored with the job) and confirm. The adapter refuses layers with no or unsupported CRS.
+- **Sync tokens instead of database credentials.** The ArcMap adapter has no database address, user or password; it holds only a personal LAIS token:
+  - the token is random (256 bits) and stored only as a SHA-256 hash;
+  - it is shown once and identified afterwards by its last four characters;
+  - it expires after 7 to 90 days, and there are at most 5 per officer;
+  - it can be revoked at any time.
+- **What a token can do.**
+  - It is accepted **only** by `/api/gis/arcmap/*`. Other endpoints ignore it, and it never creates a session.
+  - Each request loads the account's **current** GIS officer grants and nothing else, so a token cannot carry another role the account may hold.
+  - A suspended account or a revoked role stops the token at once.
+  - The endpoints take no cookies, so CSRF does not apply, and they are rate-limited.
+- **No secrets in logs.**
+  - The adapter's log shows only the token's last four characters.
+  - Server logs and audit details record job numbers, file names, hashes and counts, never tokens or file contents.
+  - Unexpected job errors are logged server-side and summarised to the officer without internal detail.
+- **Do not expose PostgreSQL.** Workstations need HTTPS access to the LAIS web server only. PostgreSQL should listen on the application host or a private network, with `pg_hba.conf` limited to the API host. Nothing in the GIS design needs a direct database connection.
+
 ## Authentication
 
 - Passwords are hashed with scrypt (N=2^15, r=8, p=1, random salt). An account locks after 5 failed attempts.

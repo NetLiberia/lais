@@ -1,16 +1,17 @@
 # Implementation status
 
-As of 27 October 2026. "Verified" means it was exercised by automated tests, browser walkthroughs or a recorded manual run on PostgreSQL 18.6 with PostGIS 3.6.2 on Windows 11.
+As of 28 October 2026. "Verified" means it was exercised by automated tests, browser walkthroughs or a recorded manual run on PostgreSQL 18.6 with PostGIS 3.6.2 on Windows 11.
 
 ## Test results
 
 | Suite | Result |
 |---|---|
 | `npm test`: unit tests (policy, workflow, helpers, CSV safety, permission document) | 44 passed |
-| `npm test`: integration tests against a real PostgreSQL + PostGIS database, including 17 for supervision (scope, no legal authority, immutability, review, conflicts, tasks, dashboard figures, reports, escalations) | 110 passed |
-| `npm test`: web component tests (shared dialogs and tables, permission-aware navigation, account creation, URL filters, supervisor dashboard empty and error states, return dialog, task moves) in jsdom | 24 passed |
+| `npm test`: integration tests against a real PostgreSQL + PostGIS database, including 17 for supervision and 32 for the GIS workspace and ArcMap sync (`gis.test.ts`) | 142 passed |
+| `npm test`: web component tests (shared dialogs and tables, permission-aware navigation, account creation, URL filters, supervisor dashboard empty and error states, return dialog, task moves, GIS dashboard, import CRS gating, submission blocking, one-time token display, UTM readout) in jsdom | 31 passed |
 | `npm run lint` (ESLint with typescript-eslint and the React hooks rules) | 0 errors, 0 warnings. `any` is an error outside test files |
-| `npm run e2e`: browser walkthroughs in Microsoft Edge (8 scripts, including the supervisor journey) | 98 steps passed, 0 problems |
+| `npm run e2e`: browser walkthroughs in Microsoft Edge (9 scripts, including the supervisor and GIS officer journeys) | 113 steps passed, 0 problems |
+| ArcMap adapter with ArcPy 10.7 (ArcGIS Desktop 10.7.1) | Toolbox and CLI run against the live API; see [arcmap-integration.md](arcmap-integration.md#6-what-was-tested-and-how) |
 | `npm run backup:verify` on a backup taken through the interface | Restored and verified (see [backup-restore.md](backup-restore.md)) |
 | `npm run typecheck`, `npm run build` | Clean |
 
@@ -50,7 +51,7 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 
 **System pages**
 - Audit & Security Logs, with the administrator's technical scope, filters, cursor paging and event detail.
-- System Health from live checks: database, PostGIS, API, GIS queue, storage, latest backup, security events and audit-chain integrity. Background jobs are honestly reported as *unknown*.
+- System Health from live checks: database, PostGIS, API, GIS queue, storage, latest backup, security events and audit-chain integrity. Background jobs report GIS job activity, stuck jobs and recent failures from the job table.
 - Allow-listed settings, including the portal banner shown to staff.
 - Document categories: add, and activate or deactivate. System categories are protected. The case upload form lists the active categories, so new ones are offered to staff at once.
 - Backups: `pg_dump` from the interface, recorded with SHA-256, and a restore check. A failed backup leaves no partial file.
@@ -137,8 +138,52 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 | Separate document-review and GIS-processing stages | The case workflow has no such states. Both are shown as "Draft / in preparation" (see [workflow.md](workflow.md)). |
 | Request and response tracking for information requests | Tracked as a task: the request is the task, the response is its completion note. There is no separate thread. |
 | Workload by leave or complexity | Not recorded, so the workload view states that raw counts are not a performance measure. |
-| PDF export | Through the browser's print dialog. No server-generated PDF. |
+| PDF export | Supervision reports print from the browser. GIS reports have server-generated PDF. |
 | Stale-version detection as a conflict category | No validation rule flags it. A changed record is caught at publication by the decision snapshot, which returns the case for review. |
+
+## GIS officer phase (Prompt 3)
+
+Full record: [prompt3-completion-report.md](prompt3-completion-report.md).
+
+### Implemented and verified
+
+- **Dashboard and tasks**
+  - The dashboard has 12 KPI cards with click-through.
+  - My GIS Tasks: acknowledge, claim, ask for clarification, begin, block, note and complete. Preparation tasks complete only after the case is submitted.
+- **Parcel Workspace map**
+  - Layers: approved reference parcels, working staging, submitted staging, invalid geometry as received, overlap areas, duplicate identifiers and county boundary.
+  - OpenStreetMap or no basemap, a scale bar, WGS 84 and UTM 29N coordinates, a legend and search.
+- **Data Import Center** (8 steps)
+  - Formats: GeoJSON, zipped shapefile, CSV with WKT and ArcMap packages. File geodatabase and GeoPackage are explained as unsupported.
+  - An unknown CRS requires a declaration, a recorded reason and confirmation.
+- **Processing jobs**
+  - Statuses: queued, running, completed, completed with warnings, failed, cancelled.
+  - Atomic staging, restart recovery, duplicate-source detection, retry as a linked job, a diagnostic and a CSV error report.
+- **ArcMap 10.x adapter**
+  - A toolbox and a command line: polygon, CRS and field checks; manifest; deterministic export ID; idempotent upload.
+  - Personal, hash-stored, revocable tokens valid only for the sync endpoints.
+  - A sync page with the observed status and a diagnostic.
+- **Versions**
+  - Every import, sync and correction is a numbered version; submitted versions are frozen by a trigger.
+  - Feature-by-feature comparison with a map overlay; attribute corrections create new versions.
+- **Validation Center**
+  - Filters, zoom, CSV, re-run.
+  - Rule severities are administrator-configurable, with versioned history; each run records the rule-set version and the boundary status.
+  - New rules: multipart, unusually large area, duplicate source ID.
+- **Submission**
+  - A checklist; blocking errors are refused with no exception route; warnings acknowledged; resubmissions explained.
+  - The snapshot hash is linked to the previous submission, with a derived status and an integrity check.
+- **Returned submissions, conflict investigation (notes, re-run, findings; no resolve), and GIS reports** as JSON, CSV and server-side PDF.
+- **System Health** now reports GIS job activity, stuck jobs and failures, instead of *unknown*.
+
+### Partial or not implemented
+
+| Item | Notes |
+|---|---|
+| File geodatabase / GeoPackage upload | No GDAL or FileGDB adapter on the server; use the ArcMap adapter or a shapefile/GeoJSON export. |
+| Dedicated job worker | Jobs run asynchronously in the API process. |
+| ArcMap toolbox run from the ArcMap interface | Run through `arcpy.ImportToolbox` and the CLI with ArcPy 10.7; not by hand in the ArcMap interface. ArcGIS Pro not tested. |
+| Remote HTTPS sync | Tested against the local API over `http://localhost`. |
 
 ## Partial
 
@@ -155,8 +200,8 @@ As of 27 October 2026. "Verified" means it was exercised by automated tests, bro
 
 | Item | Notes |
 |---|---|
-| Live ArcMap / ArcGIS integration | Data enters as GeoJSON files through staging. See [gis-sync.md](gis-sync.md). |
-| Background job queue | Imports and validation run during the request. |
+| Live ArcSDE / ArcGIS Server connection | Not provided by design: ArcMap pushes packages through the adapter ([arcmap-integration.md](arcmap-integration.md)). |
+| Separate background job worker | GIS jobs run asynchronously in the API process; validation runs during the request. |
 | Row-level security | Designed in [security.md](security.md#row-level-security). |
 | Verified county boundaries | No official boundaries are loaded. Only the two synthetic pilot counties are enabled. |
 | Upload virus scanning | |

@@ -110,6 +110,15 @@ const RULES = {
   'escalation.manage_system': { roles: ['system_admin'], scope: 'global' },
   'reports.supervision': { roles: ['supervisor', 'auditor'], scope: 'county' },
 
+  // GIS work: preparing spatial data inside an assigned county. None of these approve, publish,
+  // change ownership, delete versions or touch another county; submission goes through case.submit.
+  'gis.workspace': { roles: ['gis_officer', 'supervisor'], scope: 'county' },
+  'gis.sync_token': { roles: ['gis_officer'], scope: 'global' },
+  'gis.reports': { roles: ['gis_officer', 'supervisor'], scope: 'county' },
+  'conflict.investigate': { roles: ['gis_officer'], scope: 'county' },
+  'validation.rules_view': { roles: [...INTERNAL_READERS, 'system_admin'], scope: 'global' },
+  'validation.configure': { roles: ['system_admin'], scope: 'global' },
+
   // Document requests from landowners (status rules are enforced by the route and a database trigger)
   'docrequest.view': { roles: ['processor', 'registrar', 'supervisor', 'auditor'], scope: 'county' },
   'docrequest.prepare': { roles: ['processor'], scope: 'county' },
@@ -174,6 +183,12 @@ export const ACTION_DESCRIPTIONS: Record<Action, string> = {
   'escalation.manage': 'Acknowledge, assign, investigate, escalate further and close escalations they are responsible for',
   'escalation.manage_system': 'Act on escalations routed to system administration',
   'reports.supervision': 'Generate operational quality and compliance reports for an assigned county',
+  'gis.workspace': 'Use the GIS workspace of an assigned county: layers, import jobs, versions and submissions',
+  'gis.sync_token': 'Create and revoke personal ArcMap synchronization tokens (usable only for the sync endpoint)',
+  'gis.reports': 'Generate GIS data quality and processing reports for an assigned county',
+  'conflict.investigate': 'Investigate spatial conflicts: add notes, re-run checks and submit findings (cannot resolve or dismiss them)',
+  'validation.rules_view': 'View the validation rules and their severities',
+  'validation.configure': 'Change the severity of configurable validation rules (versioned, with a reason)',
   'docrequest.view': 'View landowner document requests',
   'docrequest.prepare': 'Prepare documents for release to a landowner',
   'docrequest.decide': 'Approve or refuse a document release',

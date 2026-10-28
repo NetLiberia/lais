@@ -9,9 +9,13 @@ LAIS-Liberia is a research prototype of a land administration information system
  Landowner portal ────── /api/me ───────▶  ┐                                  │      lais     records, parcels, RRR,
  Staff shell ─────────── /api/cases ... ─▶ ├ session + CSRF ─▶ authorize() ───┼────▶ staging  imports, validation
  Admin dashboard ─────── /api/admin ────▶  ┘   (policy.ts)      + county scope│      audit    hash-chained events
+ GIS workspace ───────── /api/gis ──────▶  (same session path)  ─▶ import jobs│
+ ArcMap adapter ──────── /api/gis/arcmap ▶ bearer sync token only ────────────┘
                                                                               │
-                          /api/openapi.json ◀── generated from the routers    └────▶ storage/  documents, backups
+                          /api/openapi.json ◀── generated from the routers    └────▶ storage/  documents, backups, gis-uploads
 ```
+
+GIS imports and ArcMap syncs run as **jobs** inside the API process (`services/gisJobs.ts`): the request answers 202, a job stages a complete new version in one transaction or nothing, and jobs left unfinished by a restart are marked failed at start-up. See [gis-sync.md](gis-sync.md) and [arcmap-integration.md](arcmap-integration.md).
 
 ## Front end (`web/`)
 
@@ -56,7 +60,7 @@ LAIS-Liberia is a research prototype of a land administration information system
   - tasks, escalations and operational reports.
 
   A national supervisor also has read-only views of accounts and the national dashboards. Supervisors have no legal authority; see [workflow.md](workflow.md).
-- **GIS officer:** county-scoped. Imports geometry into staging and runs validation.
+- **GIS officer:** county-scoped. Uses the GIS workspace: imports and syncs geometry into staging as numbered versions, corrects attributes, runs validation, investigates conflicts and submits to the supervisor. Cannot approve, publish, change ownership or delete versions.
 - **LAIS processor:** county-scoped. Records rights and documents, and verifies documents uploaded by colleagues.
 - **Land registrar:** county-scoped. Takes the legal decision (approve, return or reject) and publishes. Never on a case they helped prepare.
 - **Auditor:** reads the full audit trail and verifies the chain.
@@ -70,7 +74,7 @@ A role-combination check refuses to give one account both administration and ope
 
 See [database-schema.md](database-schema.md). Three schemas:
 - `lais`: authoritative records and administration;
-- `staging`: imported, unpublished geometry and validation runs;
+- `staging`: imported, unpublished geometry (numbered working versions), import jobs, submissions, validation runs and the versioned validation rules;
 - `audit`: the trail.
 
 ## Tests

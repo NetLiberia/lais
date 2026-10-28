@@ -63,6 +63,12 @@ The same matrix is served read-only at `GET /api/admin/permissions` and shown on
 | `escalation.manage` | Acknowledge, assign, investigate, escalate further and close escalations they are responsible for |  |  |  | ✓ | ✓ |  |  | county | — |
 | `escalation.manage_system` | Act on escalations routed to system administration | ✓ |  |  |  |  |  |  | global | — |
 | `reports.supervision` | Generate operational quality and compliance reports for an assigned county |  |  |  |  | ✓ | ✓ |  | county | — |
+| `gis.workspace` | Use the GIS workspace of an assigned county: layers, import jobs, versions and submissions |  | ✓ |  |  | ✓ |  |  | county | — |
+| `gis.sync_token` | Create and revoke personal ArcMap synchronization tokens (usable only for the sync endpoint) |  | ✓ |  |  |  |  |  | global | — |
+| `gis.reports` | Generate GIS data quality and processing reports for an assigned county |  | ✓ |  |  | ✓ |  |  | county | — |
+| `conflict.investigate` | Investigate spatial conflicts: add notes, re-run checks and submit findings (cannot resolve or dismiss them) |  | ✓ |  |  |  |  |  | county | — |
+| `validation.rules_view` | View the validation rules and their severities | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  | global | — |
+| `validation.configure` | Change the severity of configurable validation rules (versioned, with a reason) | ✓ |  |  |  |  |  |  | global | — |
 | `docrequest.view` | View landowner document requests |  |  | ✓ | ✓ | ✓ | ✓ |  | county | — |
 | `docrequest.prepare` | Prepare documents for release to a landowner |  |  | ✓ |  |  |  |  | county | — |
 | `docrequest.decide` | Approve or refuse a document release |  |  |  | ✓ |  |  |  | county | separation: not_contributor |

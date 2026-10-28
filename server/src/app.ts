@@ -27,6 +27,9 @@ import { supervisionReviewRouter } from './routes/supervisionReview.js';
 import { supervisionOpsRouter } from './routes/supervisionOps.js';
 import { tasksRouter } from './routes/tasks.js';
 import { escalationsRouter } from './routes/escalations.js';
+import { gisRouter } from './routes/gis.js';
+import { gisWorkRouter } from './routes/gisWork.js';
+import { gisSyncRouter } from './routes/gisSync.js';
 import { buildOpenApi } from './openapi.js';
 
 /**
@@ -34,7 +37,7 @@ import { buildOpenApi } from './openapi.js';
  * table and the routers' own route lists, so it cannot describe an endpoint that does not exist.
  * 'public' routes need no session; 'internal' routes need a fully authenticated session and CSRF token.
  */
-export const API_MOUNTS: { path: string; router: Router; access: 'public' | 'internal'; tag: string }[] = [
+export const API_MOUNTS: { path: string; router: Router; access: 'public' | 'internal' | 'sync'; tag: string }[] = [
   { path: '/public', router: publicRouter, access: 'public', tag: 'Public portal' },
   { path: '/auth', router: authRouter, access: 'public', tag: 'Authentication' },
   { path: '/cases', router: casesRouter, access: 'internal', tag: 'Cases' },
@@ -54,6 +57,10 @@ export const API_MOUNTS: { path: string; router: Router; access: 'public' | 'int
   { path: '/supervision', router: supervisionOpsRouter, access: 'internal', tag: 'Supervision: workload, reports and activity' },
   { path: '/tasks', router: tasksRouter, access: 'internal', tag: 'Tasks' },
   { path: '/escalations', router: escalationsRouter, access: 'internal', tag: 'Escalations' },
+  { path: '/gis', router: gisRouter, access: 'internal', tag: 'GIS: dashboard, workspace, imports and jobs' },
+  { path: '/gis', router: gisWorkRouter, access: 'internal', tag: 'GIS: versions, submissions, conflicts, validation and reports' },
+  // The ArcMap adapter authenticates with a personal bearer token, never a cookie (so CSRF does not apply).
+  { path: '/gis/arcmap', router: gisSyncRouter, access: 'sync', tag: 'GIS: ArcMap synchronization (bearer token)' },
 ];
 
 export function createApp() {
@@ -70,7 +77,7 @@ export function createApp() {
 
   // Public portal: separate router and a fixed public field list. The session is only used to exempt
   // signed-in staff from the anonymous rate limit; it never widens what these endpoints return.
-  for (const m of API_MOUNTS.filter((m) => m.access === 'public')) app.use('/api' + m.path, m.router);
+  for (const m of API_MOUNTS.filter((m) => m.access === 'public' || m.access === 'sync')) app.use('/api' + m.path, m.router);
   // The API description lists endpoints only, never data, so it is public like the portal.
   const openApi = buildOpenApi(API_MOUNTS);
   app.get('/api/openapi.json', (_req, res) => { res.json(openApi); });

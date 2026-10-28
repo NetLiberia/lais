@@ -30,6 +30,9 @@ export const PROVISIONAL_UPI_PATTERN = /^PROV-[A-Z]{2}-\d{6}$/;
 export interface Evaluation {
   findings: Finding[];
   batchId: string | null;
+  /** The rule-set version whose severities were applied, and the county boundary's status at the time. */
+  ruleSetVersion?: number | null;
+  boundaryStatus?: string | null;
 }
 
 export async function evaluateCase(db: Db, cs: CaseRow): Promise<Evaluation> {
@@ -53,7 +56,41 @@ export async function evaluateCase(db: Db, cs: CaseRow): Promise<Evaluation> {
   // A correction never changes rights, and a migration records legacy holders as documented interests.
   if (cs.case_type !== 'correction' && cs.case_type !== 'migration') await rightsChecks(db, cs, landCategory, findings);
   await documentChecks(db, cs, findings, batchId !== null);
-  return { findings, batchId };
+  if (batchId) await sourceIdChecks(db, cs, findings);
+  return applyRuleSet(db, cs, { findings, batchId });
+}
+
+/** Two features carrying the same source identifier usually means a duplicated record in the source data. */
+async function sourceIdChecks(db: Db, cs: CaseRow, out: Finding[]): Promise<void> {
+  const features = await stagedFeatures(db, cs.id);
+  const byId = new Map<string, number[]>();
+  for (const f of features) {
+    const v = f.properties?.source_id;
+    if (v === undefined || v === null || v === '') continue;
+    byId.set(String(v), [...(byId.get(String(v)) ?? []), f.feature_index]);
+  }
+  for (const [id, idx] of byId) {
+    if (idx.length < 2) continue;
+    for (const i of idx) {
+      out.push(warn('DUPLICATE_SOURCE_ID', `Feature ${i + 1}: source_id "${id.slice(0, 60)}" is also used by feature(s) ${idx.filter((x) => x !== i).map((x) => x + 1).join(', ')}`, { featureIndex: i }));
+    }
+  }
+}
+
+/**
+ * Applies the administrator-configured severities. Only rules marked configurable can differ from their
+ * default (a database CHECK), so safety rules such as invalid geometry or a wrong county always block.
+ */
+async function applyRuleSet(db: Db, cs: CaseRow, e: Evaluation): Promise<Evaluation> {
+  const { rows: rules } = await db.query<{ code: string; severity: 'error' | 'warning' }>('SELECT code, severity FROM staging.validation_rule');
+  const severity = new Map(rules.map((r) => [r.code, r.severity]));
+  const { rows: [v] } = await db.query('SELECT max(version) AS version FROM staging.rule_set_version');
+  const { rows: [c] } = await db.query('SELECT boundary_status FROM lais.county WHERE id = $1', [cs.county_id]);
+  for (const f of e.findings) {
+    const s = severity.get(f.code);
+    if (s && s !== f.severity) { f.detail = { ...f.detail, defaultSeverity: f.severity }; f.severity = s; }
+  }
+  return { ...e, ruleSetVersion: v?.version ?? null, boundaryStatus: c?.boundary_status ?? null };
 }
 
 /**
@@ -152,7 +189,7 @@ const featureLabel = (f: StagedFeature, many: boolean) => (many ? `New parcel ${
 async function featureChecks(db: Db, cs: CaseRow, f: StagedFeature, label: string, replacedParcelIds: string[], out: Finding[]): Promise<void> {
   const { rows: [g] } = await db.query(
     `SELECT ST_X(ST_Centroid(f.geom)) AS cx, ST_Y(ST_Centroid(f.geom)) AS cy,
-            ST_Area(f.geom::geography) AS area_m2,
+            ST_Area(f.geom::geography) AS area_m2, ST_NumGeometries(f.geom) AS parts,
             ST_Within(f.geom, ST_MakeEnvelope($3, $4, $5, $6, 4326)) AS in_national_extent,
             ST_CoveredBy(f.geom, c.geom) AS in_county,
             ST_Intersects(f.geom, c.geom) AS touches_county
@@ -177,6 +214,12 @@ async function featureChecks(db: Db, cs: CaseRow, f: StagedFeature, label: strin
   }
   if (g.area_m2 < config.minParcelAreaM2) {
     out.push(warn('AREA_UNUSUALLY_SMALL', `${label}Calculated area is ${Number(g.area_m2).toFixed(2)} m², below the ${config.minParcelAreaM2} m² review threshold`));
+  }
+  if (g.area_m2 > config.maxParcelAreaM2) {
+    out.push(warn('AREA_UNUSUALLY_LARGE', `${label}Calculated area is ${(Number(g.area_m2) / 10_000).toFixed(1)} ha, above the ${(config.maxParcelAreaM2 / 10_000).toFixed(0)} ha review threshold`));
+  }
+  if (g.parts > 1) {
+    out.push(warn('MULTIPART_GEOMETRY', `${label}The parcel consists of ${g.parts} separate parts`, { detail: { parts: Number(g.parts) } }));
   }
 
   // Published parcels that the new geometry intersects. Touching boundaries (zero-area intersection) are not conflicts.
@@ -677,9 +720,9 @@ export async function persistRun(
 ): Promise<string> {
   const errors = evaluation.findings.filter((f) => f.severity === 'error').length;
   const { rows: [run] } = await db.query(
-    `INSERT INTO staging.validation_run (case_id, batch_id, run_by, purpose, error_count, warning_count)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-    [cs.id, evaluation.batchId, actorId, purpose, errors, evaluation.findings.length - errors],
+    `INSERT INTO staging.validation_run (case_id, batch_id, run_by, purpose, error_count, warning_count, rule_set_version, boundary_status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    [cs.id, evaluation.batchId, actorId, purpose, errors, evaluation.findings.length - errors, evaluation.ruleSetVersion ?? null, evaluation.boundaryStatus ?? null],
   );
   for (const f of evaluation.findings) {
     await db.query(

@@ -6,3 +6,9 @@ server/storage/
 *.log
 .vscode/
 e2e/shots/
+
+# Python bytecode from the ArcMap adapter
+*.pyc
+__pycache__/
+# ArcGIS writes toolbox metadata next to a .pyt when it loads it
+*.pyt.xml

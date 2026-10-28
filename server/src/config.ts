@@ -37,6 +37,11 @@ export const config = {
   /** pg_dump used for administrator-initiated backups; empty means look it up on PATH. */
   pgDumpPath: process.env.PG_DUMP_PATH || 'pg_dump',
   backupDir: path.resolve(process.env.BACKUP_DIR || 'storage/backups'),
+  /** Uploaded GIS files awaiting import. Kept for GIS_UPLOAD_RETENTION_HOURS, then deleted. Not web-served. */
+  gisUploadDir: path.resolve(process.env.GIS_UPLOAD_DIR || 'storage/gis-uploads'),
+  gisUploadRetentionHours: number('GIS_UPLOAD_RETENTION_HOURS', 24),
+  /** A parcel larger than this (m²) is flagged for review; 500 ha by default. */
+  maxParcelAreaM2: number('MAX_PARCEL_AREA_M2', 5_000_000),
   /** Number of reverse proxies in front of the API, so client addresses are taken from X-Forwarded-For. 0 = none. */
   trustProxyHops: number('TRUST_PROXY', 0),
   /** How long a landowner can download documents released to them. */

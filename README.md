@@ -14,7 +14,9 @@ Phase 3 prototype for the MSc project *Development and Evaluation of a Privacy-A
 | Joint ownership with exact fractional shares, customary tenure by communities, mortgages, leases, easements | `services/validation.ts`, `services/shares.ts` |
 | RBAC + county jurisdiction + record status + separation of duties, checked on every request | `server/src/authz/policy.ts` |
 | Case workflow (draft → validating → under review → approved → published, plus returned / rejected / withdrawn), also enforced by a database trigger | `authz/workflow.ts`, trigger in `001_core.sql` |
-| GIS staging: GeoJSON from ArcGIS Pro / QGIS with a **declared** CRS (EPSG:4326 or 32629), stored as received, never auto-repaired | `routes/cases.ts` (`/geometry`), `002_staging.sql` |
+| GIS staging: GeoJSON, zipped shapefiles, CSV with WKT and ArcMap packages in EPSG:4326 or 32629. The CRS is never assigned silently: an unknown one must be declared with a recorded reason. Data is stored as received and never auto-repaired. Every import is a numbered working version created by a background job | `services/gisFormats.ts`, `services/gisJobs.ts`, `services/staging.ts`, `002_staging.sql`, `011_gis_workspace.sql`, [docs/gis-sync.md](docs/gis-sync.md) |
+| GIS officer workspace, in the officer's own counties:<br>• a dashboard with 12 KPIs, tasks (acknowledge, claim, clarify, complete only after submission), and a parcel workspace map with reference, working, submitted, invalid, overlap, duplicate and boundary layers;<br>• an 8-step Data Import Center, processing jobs with diagnostics and retry, and a Validation Center with administrator-configurable, versioned rule severities;<br>• conflict investigation, version comparison on a map, attribute corrections as new versions, and submission to the supervisor with a checklist (blocking errors refused, frozen snapshots linked to the previous submission);<br>• returned submissions, and GIS reports (JSON, CSV, PDF) | `pages/gis/`, `routes/gis.ts`, `routes/gisWork.ts` |
+| ArcMap 10.x synchronization: a Python toolbox and command line export validated packages with a deterministic export ID and upload them with a personal, revocable, hash-stored token (no database credentials anywhere). Resends are processed once. Tested with ArcPy 10.7 | `integrations/arcmap/`, `routes/gisSync.ts`, `auth/syncToken.ts`, [docs/arcmap-integration.md](docs/arcmap-integration.md) |
 | Validation and conflict detection: invalid / self-intersecting, swapped axes, wrong CRS, outside county, crosses county boundary, overlaps with published parcels, suspected duplicates, competing open submissions, duplicate UPIs | `services/validation.ts` |
 | Conflicts are **warnings**: the registrar must acknowledge each one with a note before approving. The system never decides a dispute | `routes/cases.ts` |
 | Decision snapshot: approval records a hash of exactly what was reviewed; publication refuses and reopens the case if anything changed | `services/snapshot.ts`, `services/publication.ts` |
@@ -121,18 +123,34 @@ npm test
 - **44 unit tests**: permission matrix (and a check that `docs/permission-matrix.md` matches it), CSV formula safety, cross-county denial, separation of duties, workflow (including a check that the TypeScript transition table matches the SQL trigger), TOTP RFC test vectors, password hashing, GeoJSON/CRS intake (including malformed files), fractional shares, file sniffing.
 - **110 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration, transfer, subdivision, consolidation, correction, legacy-migration and confirmation lifecycles, landowner document requests, rate limits, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, administrator limits, the account lifecycle (invitation, activation, reset, suspension), the dashboard figures against the database, county enablement, settings, backups, reports, the OpenAPI description, and supervision (county scope, no legal authority, quality review and the optional approval gate, returns, conflicts, task rules, reports and escalation closure). Two concurrency tests run only against a real multi-connection server. One publishes two overlapping parcels at the same moment and checks that the per-county lock lets only one through (verified to fail with the lock removed). The other checks that the audit hash chain survives 40 parallel writers.
 
-Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 154 tests in about 30 seconds with the default 10-connection pool.
+- **32 GIS integration tests** (`gis.test.ts`). The shapefiles and the package come from ArcPy, in `server/fixtures/gis/`. They cover:
+  - inspection of the shapefiles, CSV and packages;
+  - unsafe archives, refused;
+  - CRS rules (no declaration, no reason, contradiction, unsupported CRS, UTM storage);
+  - jobs: preview, CSV import, duplicate source, rejected records, failure and retry, restart recovery, county isolation;
+  - versions, corrections and comparison;
+  - submissions: refused with errors, the snapshot frozen by a trigger, resubmission linked after a supervisor return;
+  - ArcMap tokens: hash-only storage, sync scope, revocation, idempotent resend, manifest checks;
+  - versioned rule configuration applied to runs;
+  - GIS tasks, conflict investigation, dashboard, layers and reports.
 
-`npm test` also runs **24 web component tests** (Vitest, Testing Library, jsdom). They cover:
+Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 186 server tests in about 75 seconds with the default 10-connection pool.
+
+`npm test` also runs **31 web component tests** (Vitest, Testing Library, jsdom). They cover:
 - the shared dialogs: a reason is required, server refusals are shown, and focus stays where the user is typing;
 - tables and paging;
 - the navigation each role sees;
 - the create-account form: county rules, no surveyor role, no password field, and a one-time link;
-- URL filters: a filter chosen straight after clearing the search is kept.
+- URL filters: a filter chosen straight after clearing the search is kept;
+- the GIS pages:
+  - the import wizard will not preview data with an unknown CRS until it is declared, explained and confirmed;
+  - submission is impossible with blocking errors;
+  - a sync token is shown once;
+  - the UTM 29N readout matches ArcPy to the centimetre.
 
 `npm run lint` runs ESLint over the API, the web app and the walkthroughs. API responses are typed in `web/src/types.ts`, and `any` is a lint error outside test files.
 
-**Browser walkthroughs.** With the API and web app running, `npm run e2e` drives Microsoft Edge through eight scripted journeys: registration, subdivision, document requests, corrections, legacy migration, confirmation, the administrator dashboard and the supervisor dashboard. It resets the development database before each one. Set `LAIS_WEB_URL` if the web app is not on port 5173, and `BROWSER_PATH` for another Chromium browser. Screenshots go to `e2e/shots/`. Last run: 98 steps, 0 problems.
+**Browser walkthroughs.** With the API and web app running, `npm run e2e` drives Microsoft Edge through nine scripted journeys: registration, subdivision, document requests, corrections, legacy migration, confirmation, the administrator dashboard, the supervisor dashboard and the GIS officer workspace. It resets the development database before each one. Set `LAIS_WEB_URL` if the web app is not on port 5173, and `BROWSER_PATH` for another Chromium browser. Screenshots go to `e2e/shots/`. Last run: 113 steps, 0 problems.
 
 **Backups.** `npm run backup:verify -w server -- <file>` restores a backup into `TEST_DATABASE_URL` and checks it (see [docs/backup-restore.md](docs/backup-restore.md)).
 
@@ -172,6 +190,17 @@ Other fixtures: `adjacent_touching` (expected: no conflict), `duplicate_of_mo5`,
 
 **Document request:** documents can be released only from published cases, and seeded parcels have none. So first publish a transfer of, for example, PROV-MO-000010 to *Musu Testperson*, with a verified deed. Then sign in as owner.demo → *My land* → *Request documents*. proc.mo prepares the release under *Document requests*, reg.mo decides, and owner.demo downloads the copy.
 
+**GIS officer:** sign in as gis.mo, which opens the *GIS Officer Dashboard*. Then:
+1. Open a *Legacy migration* case under Cases.
+2. In the *Data Import Center*, upload `server/fixtures/gis/synthetic_parcels_noprj_shp.zip`.
+   - The wizard reports that the CRS is unknown and will not continue until you declare EPSG:4326, say how you know it, and confirm.
+   - Map `legacy_ref` to `PARCEL_NO` and `land_category` to `CATEGORY`, preview, and confirm.
+   - The job stages version 1. Its diagnostic and error report are under *Processing Jobs*.
+3. Correct an attribute under *Versions & Compare* to create version 2, and compare the two on the map.
+4. *Submit to Supervisor* refuses blocking errors. Try a registration case importing `crosses_county_4326.geojson`.
+5. Under *ArcMap Sync*, create a token and follow [docs/arcmap-integration.md](docs/arcmap-integration.md) to sync from ArcMap 10.x. `synthetic_parcels_4326_shp.zip`, `synthetic_parcels_utm29n_shp.zip` and `synthetic_parcels_wkt_4326.csv` are the other samples, all produced with ArcPy.
+6. As admin, *Validation Rules* changes a configurable rule's severity; each change is a new rule-set version.
+
 ## Known limits of this prototype
 
 - One parcel per registration case. Bulk import exists only for legacy migration, where holders are documented rather than registered. Documented interests become registered through a confirmation case.
@@ -181,5 +210,6 @@ Other fixtures: `adjacent_touching` (expected: no conflict), `duplicate_of_mo5`,
 - Released documents are the stored files themselves; there is no certified-copy watermarking or fee handling.
 - Conflict tolerances (`OVERLAP_TOLERANCE_M2`, `DUPLICATE_HAUSDORFF_M`, `MIN_PARCEL_AREA_M2`, `COVERAGE_TOLERANCE_M2`) and the public field list (`PUBLIC_PARCEL_FIELDS`) are placeholders until the cadastral authority and the disclosure policy define them.
 - The audit chain resists tampering by application users, but a database superuser can still alter it. For higher assurance, run `server/db/roles.sql` so the app uses a least-privilege role, and ship events to a separate log store.
-- Map tiles come from OpenStreetMap's public servers, so the browser fetches them from the internet.
+- Map tiles come from OpenStreetMap's public servers, so the browser fetches them from the internet. The GIS workspace map offers a *No basemap* option for offline use.
+- File geodatabases and GeoPackages cannot be uploaded directly; there is no GDAL or FileGDB adapter on the server. Use the ArcMap adapter, or export as shapefile or GeoJSON. GIS jobs run in the API process rather than a separate worker. The ArcMap adapter was tested with ArcPy 10.7 from scripts, not through the toolbox dialog in ArcMap's interface.
 - Not security-audited, load-tested or usability-tested; those are Phase 7 evaluation activities. HTTPS, scheduled off-host backups and secret management belong to the deployment environment. Docker Compose files are provided but unverified. What is implemented, partial or unverified is listed in [docs/status.md](docs/status.md).
