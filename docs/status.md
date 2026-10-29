@@ -7,7 +7,7 @@ As of 28 October 2026. "Verified" means it was exercised by automated tests, bro
 | Suite | Result |
 |---|---|
 | `npm test`: unit tests (policy, workflow, helpers, CSV safety, permission document) | 44 passed |
-| `npm test`: integration tests against a real PostgreSQL + PostGIS database, including 17 for supervision and 32 for the GIS workspace and ArcMap sync (`gis.test.ts`) | 142 passed |
+| `npm test`: integration tests against a real PostgreSQL + PostGIS database, including 17 for supervision and 33 for the GIS workspace and ArcMap sync (`gis.test.ts`) | 143 passed |
 | `npm test`: web component tests (shared dialogs and tables, permission-aware navigation, account creation, URL filters, supervisor dashboard empty and error states, return dialog, task moves, GIS dashboard, import CRS gating, submission blocking, one-time token display, UTM readout) in jsdom | 31 passed |
 | `npm run lint` (ESLint with typescript-eslint and the React hooks rules) | 0 errors, 0 warnings. `any` is an error outside test files |
 | `npm run e2e`: browser walkthroughs in Microsoft Edge (9 scripts, including the supervisor and GIS officer journeys) | 113 steps passed, 0 problems |

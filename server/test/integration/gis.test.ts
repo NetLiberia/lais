@@ -180,6 +180,23 @@ describe.skipIf(!TEST_DB)('GIS workspace and ArcMap integration', () => {
       expect(merc.status).toBe(400);
     });
 
+    it('records on case-page imports whether the CRS came from the file or from the officer', async () => {
+      const withCrs = JSON.parse(onePolygon(0.05).toString());
+      withCrs.crs = { type: 'name', properties: { name: 'urn:ogc:def:crs:EPSG::4326' } };
+      const a = await as('gis.mo').upload(`/api/cases/${caseId}/geometry`, Buffer.from(JSON.stringify(withCrs)), 'with-crs.geojson', { crs: '4326' });
+      expect(a.status).toBe(201);
+      const b = await as('gis.mo').upload(`/api/cases/${caseId}/geometry`, onePolygon(0.06), 'no-crs.geojson', { crs: '4326' });
+      expect(b.status).toBe(201);
+      const { rows } = await pool.query(
+        `SELECT source_name, source_crs_detected, crs_exception_reason FROM staging.import_job WHERE case_id = $1 AND purpose = 'Case page import' ORDER BY created_at`, [caseId]);
+      expect(rows).toEqual([
+        { source_name: 'with-crs.geojson', source_crs_detected: 4326, crs_exception_reason: null },
+        { source_name: 'no-crs.geojson', source_crs_detected: null, crs_exception_reason: expect.stringMatching(/Chosen explicitly by the officer/) },
+      ]);
+      // A declaration that contradicts the file is refused, as in the wizard.
+      expect((await as('gis.mo').upload(`/api/cases/${caseId}/geometry`, Buffer.from(JSON.stringify(withCrs)), 'with-crs.geojson', { crs: '32629' })).status).toBe(400);
+    });
+
     it('stages UTM 29N data and keeps the input coordinates as received', async () => {
       const key = (await inspect('synthetic_parcels_utm29n_shp.zip')).body.uploadKey;
       const job = await importAndWait(caseId, key, { fieldMapping: { legacy_ref: 'PARCEL_NO', land_category: 'CATEGORY' } });

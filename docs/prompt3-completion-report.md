@@ -9,7 +9,7 @@ This prototype runs on synthetic data. "Verified" below means exercised by autom
 | Check | Result |
 |---|---|
 | Server unit tests | 44 passed |
-| Server integration tests (110 existing + 32 new GIS tests) | 142 passed |
+| Server integration tests (110 existing + 33 new GIS tests) | 143 passed |
 | Web component tests (24 existing + 7 new GIS tests) | 31 passed |
 | ESLint, TypeScript, production build | 0 problems, clean, clean |
 | Browser walkthroughs (`npm run e2e`, 9 scripts including the new `gis` walkthrough of 15 steps) | 113 steps passed, 0 problems. The GIS officer now lands on the GIS dashboard, so four older scripts open the case list explicitly |

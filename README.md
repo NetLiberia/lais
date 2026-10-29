@@ -123,7 +123,7 @@ npm test
 - **44 unit tests**: permission matrix (and a check that `docs/permission-matrix.md` matches it), CSV formula safety, cross-county denial, separation of duties, workflow (including a check that the TypeScript transition table matches the SQL trigger), TOTP RFC test vectors, password hashing, GeoJSON/CRS intake (including malformed files), fractional shares, file sniffing.
 - **110 integration tests**: run against `TEST_DATABASE_URL` and skipped when it is unset. They cover public-API privacy, CSRF, the full registration, transfer, subdivision, consolidation, correction, legacy-migration and confirmation lifecycles, landowner document requests, rate limits, cross-county attempts by direct API call, all geometry fixtures in `server/fixtures/`, failed-publication rollback, SQL-level workflow and history guards, audit immutability and tamper detection, document access by classification, administrator limits, the account lifecycle (invitation, activation, reset, suspension), the dashboard figures against the database, county enablement, settings, backups, reports, the OpenAPI description, and supervision (county scope, no legal authority, quality review and the optional approval gate, returns, conflicts, task rules, reports and escalation closure). Two concurrency tests run only against a real multi-connection server. One publishes two overlapping parcels at the same moment and checks that the per-county lock lets only one through (verified to fail with the lock removed). The other checks that the audit hash chain survives 40 parallel writers.
 
-- **32 GIS integration tests** (`gis.test.ts`). The shapefiles and the package come from ArcPy, in `server/fixtures/gis/`. They cover:
+- **33 GIS integration tests** (`gis.test.ts`). The shapefiles and the package come from ArcPy, in `server/fixtures/gis/`. They cover:
   - inspection of the shapefiles, CSV and packages;
   - unsafe archives, refused;
   - CRS rules (no declaration, no reason, contradiction, unsupported CRS, UTM storage);
@@ -134,7 +134,7 @@ npm test
   - versioned rule configuration applied to runs;
   - GIS tasks, conflict investigation, dashboard, layers and reports.
 
-Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 186 server tests in about 75 seconds with the default 10-connection pool.
+Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 187 server tests in about 75 seconds with the default 10-connection pool.
 
 `npm test` also runs **31 web component tests** (Vitest, Testing Library, jsdom). They cover:
 - the shared dialogs: a reason is required, server refusals are shown, and focus stays where the user is typing;

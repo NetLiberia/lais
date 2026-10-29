@@ -15,7 +15,7 @@ import { CASE_STATUSES, SPATIAL_CASE_TYPES } from '../authz/workflow.js';
 import { reviewMode } from '../services/supervision.js';
 import { copyVersion, isSubmitted, recordSubmission, stageFeatures } from '../services/staging.js';
 import { caseContext, getCase, inCaseTx, recordEvent, setStatus, type CaseRow } from '../services/cases.js';
-import { ACCEPTED_SRIDS, extractFeatures, FEATURE_LIMITS } from '../services/geojson.js';
+import { ACCEPTED_SRIDS, extractFeatures, FEATURE_LIMITS, parseCrsMember } from '../services/geojson.js';
 import { computeSnapshot } from '../services/snapshot.js';
 import { evaluateCase, latestRun, persistRun, PROVISIONAL_UPI_PATTERN } from '../services/validation.js';
 import { publishApprovedCase } from '../services/publication.js';
@@ -411,13 +411,17 @@ casesRouter.post('/:id/geometry', geojsonUpload.single('file'), async (req, res)
   const result = await inCaseTx(req, 'case.import_geometry', async (client, cs) => {
     const features = extractFeatures(req.file!.buffer.toString('utf8'), srid, FEATURE_LIMITS[cs.case_type]);
     const sha256 = createHash('sha256').update(req.file!.buffer).digest('hex');
+    // extractFeatures has already refused a crs member that contradicts the declaration, so one that is present matches it.
+    let detected: number | null;
+    try { detected = parseCrsMember((JSON.parse(req.file!.buffer.toString('utf8')) as { crs?: unknown }).crs); } catch { detected = null; }
     // Quick imports from the case page are recorded as import jobs too, so the job history is complete.
     const { rows: [job] } = await client.query(
       `INSERT INTO staging.import_job (kind, status, county_id, case_id, initiated_by, purpose, source_name, source_format, source_size_bytes,
                                        source_sha256, source_crs_detected, source_crs_declared, crs_exception_reason, records_received, started_at)
-       VALUES ('import', 'running', $1, $2, $3, 'Case page import', $4, 'geojson', $5, $6, NULL, $7, 'Declared by the officer on the case page (GeoJSON has no CRS metadata)', $8, now())
+       VALUES ('import', 'running', $1, $2, $3, 'Case page import', $4, 'geojson', $5, $6, $9, $7,
+               CASE WHEN $9::int IS NULL THEN 'Chosen explicitly by the officer on the case page; the file states no CRS' END, $8, now())
        RETURNING id, job_no`,
-      [cs.county_id, cs.id, req.auth!.user.id, req.file!.originalname.slice(0, 200), req.file!.size, sha256, srid, features.length],
+      [cs.county_id, cs.id, req.auth!.user.id, req.file!.originalname.slice(0, 200), req.file!.size, sha256, srid, features.length, detected],
     );
     const staged = await stageFeatures(client, cs, {
       features, srid, sourceName: req.file!.originalname, sha256, userId: req.auth!.user.id, sourceKind: 'upload', jobId: job.id,
