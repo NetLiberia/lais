@@ -674,7 +674,7 @@ async function rightsChecks(db: Db, cs: CaseRow, landCategory: string | null, ou
 
 async function documentChecks(db: Db, cs: CaseRow, out: Finding[], hasGeometry: boolean): Promise<void> {
   const { rows: docs } = await db.query(
-    `SELECT id, doc_type, reference_no, verification_status FROM lais.document WHERE case_id = $1`,
+    `SELECT id, doc_type, reference_no, verification_status FROM lais.document WHERE case_id = $1 AND review_status <> 'superseded'`,
     [cs.id],
   );
   for (const d of docs) {

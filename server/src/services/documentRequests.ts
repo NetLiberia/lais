@@ -32,7 +32,7 @@ export async function candidateDocuments(db: Db, parcelId: string) {
             c.case_no, c.case_type, (d.classification <> 'highly_sensitive') AS releasable
        FROM lais.document d
        JOIN lais.land_case c ON c.id = d.case_id
-      WHERE c.status = 'published' AND d.verification_status = 'verified'
+      WHERE c.status = 'published' AND d.verification_status = 'verified' AND d.review_status <> 'superseded'
         AND (c.parcel_id = $1 OR c.id IN (SELECT case_id FROM lais.parcel_lineage WHERE child_parcel_id = $1))
       ORDER BY c.updated_at DESC, d.doc_type`,
     [parcelId],

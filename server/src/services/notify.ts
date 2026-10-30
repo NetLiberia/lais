@@ -1,7 +1,7 @@
 import type { Db } from '../db.js';
 import type { Role } from '../authz/policy.js';
 
-export type NotificationCategory = 'account' | 'security' | 'workflow' | 'gis' | 'system' | 'task' | 'escalation' | 'review';
+export type NotificationCategory = 'account' | 'security' | 'workflow' | 'gis' | 'system' | 'task' | 'escalation' | 'review' | 'application';
 
 interface Notice {
   category: NotificationCategory;

@@ -30,6 +30,11 @@ import { escalationsRouter } from './routes/escalations.js';
 import { gisRouter } from './routes/gis.js';
 import { gisWorkRouter } from './routes/gisWork.js';
 import { gisSyncRouter } from './routes/gisSync.js';
+import { applicationsRouter } from './routes/applications.js';
+import { applicationDocsRouter, documentCenterRouter, infoRequestsRouter } from './routes/applicationWork.js';
+import { applicantsRouter } from './routes/applicants.js';
+import { processorRouter } from './routes/processor.js';
+import { applicationConfigRouter } from './routes/applicationConfig.js';
 import { buildOpenApi } from './openapi.js';
 
 /**
@@ -57,6 +62,13 @@ export const API_MOUNTS: { path: string; router: Router; access: 'public' | 'int
   { path: '/supervision', router: supervisionOpsRouter, access: 'internal', tag: 'Supervision: workload, reports and activity' },
   { path: '/tasks', router: tasksRouter, access: 'internal', tag: 'Tasks' },
   { path: '/escalations', router: escalationsRouter, access: 'internal', tag: 'Escalations' },
+  { path: '/applications', router: applicationsRouter, access: 'internal', tag: 'Applications: registration, workspace and GIS handoff' },
+  { path: '/applications', router: applicationDocsRouter, access: 'internal', tag: 'Applications: documents and information requests' },
+  { path: '/documents', router: documentCenterRouter, access: 'internal', tag: 'Documents: repository and administrative review' },
+  { path: '/info-requests', router: infoRequestsRouter, access: 'internal', tag: 'Information requests' },
+  { path: '/applicants', router: applicantsRouter, access: 'internal', tag: 'Applicants' },
+  { path: '/processor', router: processorRouter, access: 'internal', tag: 'Processor: dashboard, work lists and reports' },
+  { path: '/application-config', router: applicationConfigRouter, access: 'internal', tag: 'Administration: application categories and requirements' },
   { path: '/gis', router: gisRouter, access: 'internal', tag: 'GIS: dashboard, workspace, imports and jobs' },
   { path: '/gis', router: gisWorkRouter, access: 'internal', tag: 'GIS: versions, submissions, conflicts, validation and reports' },
   // The ArcMap adapter authenticates with a personal bearer token, never a cookie (so CSRF does not apply).

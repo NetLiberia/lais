@@ -69,6 +69,22 @@ The same matrix is served read-only at `GET /api/admin/permissions` and shown on
 | `conflict.investigate` | Investigate spatial conflicts: add notes, re-run checks and submit findings (cannot resolve or dismiss them) |  | ✓ |  |  |  |  |  | county | — |
 | `validation.rules_view` | View the validation rules and their severities | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  | global | — |
 | `validation.configure` | Change the severity of configurable validation rules (versioned, with a reason) | ✓ |  |  |  |  |  |  | global | — |
+| `application.register` | Register land applications received through an official channel (as drafts or registered) |  |  | ✓ |  |  |  |  | county | — |
+| `application.edit` | Update the administrative details of an application while it is a draft or returned |  |  | ✓ |  |  |  |  | county | status: draft, returned |
+| `application.assign` | Assign the responsible processor of an application |  |  | ✓ |  | ✓ |  |  | county | — |
+| `application.note` | Add administrative notes to an application |  | ✓ | ✓ | ✓ | ✓ |  |  | county | — |
+| `application.review_document` | Record the administrative review of a document (readable, complete, consistent): not legal validity |  |  | ✓ |  |  |  |  | county | status: draft, returned |
+| `application.handoff` | Hand an administratively complete application over to GIS processing (creates a GIS task) |  |  | ✓ |  |  |  |  | county | status: draft, returned |
+| `application.grant_exception` | Grant a justified, audited exception to a completeness requirement |  |  |  |  | ✓ |  |  | county | status: draft, returned |
+| `applicant.view` | View applicant records (contact details and identification are separate permissions) |  |  | ✓ | ✓ | ✓ |  |  | county | — |
+| `applicant.manage` | Create applicant records and correct them with a recorded reason |  |  | ✓ |  |  |  |  | county | — |
+| `applicant.view_contact` | See applicant telephone, e-mail and address |  |  | ✓ | ✓ |  |  |  | county | — |
+| `applicant.view_identity` | Reveal an applicant identification reference (logged) |  |  | ✓ | ✓ |  |  |  | county | — |
+| `info_request.view` | View additional-information requests to applicants |  |  | ✓ | ✓ | ✓ |  |  | county | — |
+| `info_request.manage` | Create information requests, record responses, and mark them satisfied, reopened or closed |  |  | ✓ |  |  |  |  | county | — |
+| `reports.processing` | Generate application-processing reports for an assigned county |  |  | ✓ |  | ✓ |  |  | county | — |
+| `application_config.manage` | Configure application categories and their required fields and documents | ✓ |  |  |  |  |  |  | global | — |
+| `application_config.view` | View the application categories and requirements | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |  | global | — |
 | `docrequest.view` | View landowner document requests |  |  | ✓ | ✓ | ✓ | ✓ |  | county | — |
 | `docrequest.prepare` | Prepare documents for release to a landowner |  |  | ✓ |  |  |  |  | county | — |
 | `docrequest.decide` | Approve or refuse a document release |  |  |  | ✓ |  |  |  | county | separation: not_contributor |

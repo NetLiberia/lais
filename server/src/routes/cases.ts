@@ -1,6 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { Router, type Request } from 'express';
 import type pg from 'pg';
 import multer from 'multer';
@@ -21,7 +19,7 @@ import { evaluateCase, latestRun, persistRun, PROVISIONAL_UPI_PATTERN } from '..
 import { publishApprovedCase } from '../services/publication.js';
 import { OWNERSHIP_TYPES } from '../services/shares.js';
 import { notifyRoles, notifyUsers } from '../services/notify.js';
-import { detectDocumentType } from '../services/files.js';
+import { assertStageReady, reviewDocument, storeDocument } from '../services/applications.js';
 import { csvCell } from '../csv.js';
 import { documentBody, documentQuery } from '../openapi.js';
 
@@ -81,7 +79,7 @@ casesRouter.get('/', async (req, res) => {
   res.json(rows);
 });
 
-const createBody = z.discriminatedUnion('caseType', [
+export const createBody = z.discriminatedUnion('caseType', [
   z.object({
     caseType: z.literal('first_registration'),
     countyId: z.number().int(),
@@ -122,9 +120,12 @@ const createBody = z.discriminatedUnion('caseType', [
   }),
 ]);
 
-casesRouter.post('/', async (req, res) => {
-  const body = createBody.parse(req.body);
-  const created = await tx(async (client) => {
+/**
+ * Opens a case inside the caller's transaction. Jurisdiction comes from the published parcels (or the
+ * county named for new registrations), the county must be enabled, and the caller must hold `action`
+ * there. Used by POST /cases and by application registration.
+ */
+export async function createCaseRecord(req: Request, client: pg.PoolClient, body: z.infer<typeof createBody>, action: 'case.create' | 'application.register' = 'case.create') {
     let countyId: number;
     let parcelId: string | null = null;
     let sourceIds: string[] = [];
@@ -173,7 +174,7 @@ casesRouter.post('/', async (req, res) => {
         landUse = parcels[0].land_use;
       }
     }
-    enforce(req, 'case.create', { countyId }, { entityType: 'case' });
+    enforce(req, action, { countyId }, { entityType: 'case' });
     const { rows: [county] } = await client.query('SELECT name, enabled FROM lais.county WHERE id = $1', [countyId]);
     if (!county.enabled) throw conflict(`${county.name} is not enabled for operations yet; an administrator must configure its boundary and enable it`);
 
@@ -199,8 +200,12 @@ casesRouter.post('/', async (req, res) => {
     }
     await recordEvent(client, cs.id, req.auth!.user.id, 'create', null, null, 'draft');
     await writeAudit(req, { action: 'case.create', outcome: 'success', entityType: 'case', entityId: cs.id, caseId: cs.id, countyId, detail: { caseNo: cs.case_no, caseType: body.caseType } }, client);
-    return cs;
-  });
+    return { id: cs.id as string, case_no: cs.case_no as string, county_id: countyId };
+}
+
+casesRouter.post('/', async (req, res) => {
+  const body = createBody.parse(req.body);
+  const created = await tx((client) => createCaseRecord(req, client, body));
   res.status(201).json(created);
 });
 
@@ -609,37 +614,8 @@ const documentFields = z.object({
 casesRouter.post('/:id/documents', documentUpload.single('file'), async (req, res) => {
   if (!req.file) throw badRequest('Attach a file');
   const fields = documentFields.parse(req.body ?? {});
-  const { rows: [category] } = await pool.query('SELECT active FROM lais.document_category WHERE code = $1', [fields.docType]);
-  if (!category?.active) throw badRequest('Unknown or inactive document category');
-  const mime = detectDocumentType(req.file.buffer);
-  if (!mime) throw badRequest('Only PDF, PNG and JPEG files are accepted');
-  if (fields.docType === 'id_document' && fields.classification !== 'highly_sensitive') {
-    throw badRequest('Identity documents must be classified as highly sensitive');
-  }
-
-  const storageKey = randomBytes(16).toString('hex');
-  const filePath = path.join(config.documentStorageDir, storageKey);
-  try {
-    const created = await inCaseTx(req, 'case.upload_document', async (client, cs) => {
-      // Malware scanning would plug in here before the file is accepted (not implemented in the prototype).
-      await fs.mkdir(config.documentStorageDir, { recursive: true });
-      await fs.writeFile(filePath, req.file!.buffer, { flag: 'wx' });
-      const sha256 = createHash('sha256').update(req.file!.buffer).digest('hex');
-      const { rows: [doc] } = await client.query(
-        `INSERT INTO lais.document (case_id, doc_type, reference_no, issuer, issued_on, classification, storage_key, sha256, mime_type, size_bytes, original_name, uploaded_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
-        [cs.id, fields.docType, fields.referenceNo ?? null, fields.issuer ?? null, fields.issuedOn ?? null, fields.classification,
-          storageKey, sha256, mime, req.file!.size, req.file!.originalname.slice(0, 200), req.auth!.user.id],
-      );
-      await recordEvent(client, cs.id, req.auth!.user.id, 'upload_document', `${fields.docType} ${fields.referenceNo ?? ''}`.trim());
-      await writeAudit(req, { action: 'document.upload', outcome: 'success', entityType: 'document', entityId: doc.id, caseId: cs.id, countyId: cs.county_id, detail: { docType: fields.docType, classification: fields.classification, sha256 } }, client);
-      return doc;
-    });
-    res.status(201).json(created);
-  } catch (err) {
-    await fs.unlink(filePath).catch(() => undefined);
-    throw err;
-  }
+  const created = await inCaseTx(req, 'case.upload_document', (client, cs) => storeDocument(req, client, cs, req.file!, fields));
+  res.status(201).json(created);
 });
 
 const verifyBody = z.object({ status: z.enum(['verified', 'rejected']), note: z.string().min(5).max(1000) });
@@ -648,21 +624,11 @@ casesRouter.post('/:id/documents/:docId/verify', async (req, res) => {
   const docId = parseId(req.params.docId);
   const body = verifyBody.parse(req.body);
   await inCaseTx(req, 'case.verify_document', async (client, cs) => {
-    const { rows: [doc] } = await client.query('SELECT * FROM lais.document WHERE id = $1 AND case_id = $2 FOR UPDATE', [docId, cs.id]);
+    const { rows: [doc] } = await client.query('SELECT verification_status FROM lais.document WHERE id = $1 AND case_id = $2', [docId, cs.id]);
     if (!doc) throw notFound('Document not found on this case');
     if (doc.verification_status !== 'pending') throw conflict('This document has already been checked');
-    if (doc.uploaded_by === req.auth!.user.id) {
-      throw new HttpError(403, 'Separation of duties: the officer who uploaded a document cannot verify it').withAudit({
-        action: 'authz.denied', outcome: 'denied', entityType: 'document', entityId: doc.id, caseId: cs.id, countyId: cs.county_id,
-        detail: { requestedAction: 'case.verify_document', reason: 'uploader_cannot_verify' },
-      });
-    }
-    await client.query(
-      `UPDATE lais.document SET verification_status = $2, verified_by = $3, verified_at = now(), verification_note = $4 WHERE id = $1`,
-      [doc.id, body.status, req.auth!.user.id, body.note],
-    );
-    await recordEvent(client, cs.id, req.auth!.user.id, 'verify_document', `${doc.doc_type}: ${body.status}`);
-    await writeAudit(req, { action: 'document.verify', outcome: 'success', entityType: 'document', entityId: doc.id, caseId: cs.id, countyId: cs.county_id, detail: { result: body.status } }, client);
+    // The quick check on the case page is an administrative review: verified = accepted, rejected = incomplete.
+    await reviewDocument(req, client, cs, docId, { status: body.status === 'verified' ? 'accepted' : 'incomplete', note: body.note });
   });
   res.json({ ok: true });
 });
@@ -689,6 +655,8 @@ export async function submitCase(req: Request, client: pg.PoolClient, cs: CaseRo
   summary?: string | null; changeExplanation?: string | null; outstandingWarnings?: string | null; warningsAcknowledged?: boolean;
 } = {}) {
   const actor = req.auth!.user.id;
+  // Applications registered through intake must meet their configured requirements (or hold an exception).
+  await assertStageReady(client, cs, 'submission');
   const validating = await setStatus(client, cs, 'validating', actor, 'submit', details.summary ?? null);
   const evaluation = await evaluateCase(client, validating);
   const runId = await persistRun(client, validating, evaluation, actor, 'submission');

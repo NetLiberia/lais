@@ -22,6 +22,11 @@ export interface CaseRow {
   /** Operational fields set by supervisors; outside the decision snapshot. */
   priority: 'low' | 'normal' | 'high' | 'urgent';
   due_date: Date | null;
+  /** Application intake (migration 013): set for applications registered by processors. */
+  applicant_id: string | null;
+  category_code: string | null;
+  intake_status: 'draft' | 'registered';
+  assigned_processor_id: string | null;
   created_by: string;
   created_at: Date;
   updated_at: Date;

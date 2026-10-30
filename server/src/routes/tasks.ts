@@ -54,12 +54,14 @@ async function loadTask(db: pg.PoolClient | typeof pool, id: string, lock = fals
 
 const isSupervisorFor = (req: Request, t: TaskRow) => authorize(req.auth!.principal, 'task.manage', { countyId: t.county_id }).allowed;
 const isAssignee = (req: Request, t: TaskRow) => t.assignee_id === req.auth!.user.id;
+/** The officer who created a task (for example a processor's GIS handoff) follows it and can comment on it. */
+const isCreator = (req: Request, t: TaskRow) => t.created_by === req.auth!.user.id;
 
 /** Who may see a task: supervisors, registrars and auditors of its county, and its assignee. */
 function assertCanSee(req: Request, t: TaskRow) {
   const p = req.auth!.principal;
   const overseer = p.grants.some((g) => ['supervisor', 'registrar', 'auditor'].includes(g.role) && (g.countyId === null || g.countyId === t.county_id));
-  if (overseer || isAssignee(req, t)) return;
+  if (overseer || isAssignee(req, t) || isCreator(req, t)) return;
   enforce(req, 'task.manage', { countyId: t.county_id }, { entityType: 'task', entityId: t.id, caseId: t.case_id });
 }
 
@@ -389,7 +391,7 @@ tasksRouter.post('/:id/comments', async (req, res) => {
   const body = commentBody.parse(req.body);
   await tx(async (client) => {
     const t = await loadTask(client, parseId(req.params.id), true);
-    if (!isAssignee(req, t)) enforce(req, 'task.manage', { countyId: t.county_id }, { entityType: 'task', entityId: t.id, caseId: t.case_id });
+    if (!isAssignee(req, t) && !isCreator(req, t)) enforce(req, 'task.manage', { countyId: t.county_id }, { entityType: 'task', entityId: t.id, caseId: t.case_id });
     await event(client, t.id, req.auth!.user.id, 'comment', null, null, body.note, body.reference);
     const other = isAssignee(req, t) ? t.created_by : t.assignee_id;
     await notifyUsers(client, [other], { category: 'task', title: `New comment on task ${t.task_no}`, body: body.note.slice(0, 200), link: isAssignee(req, t) ? `/supervisor/tasks?task=${t.id}` : '/work/tasks' });
