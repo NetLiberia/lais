@@ -26,11 +26,11 @@ GIS officers cannot approve, publish, change ownership, delete a version, alter 
 | GeoJSON (`.geojson`, `.json`) | A file or an archive member | The `crs` member, if present. Otherwise the officer declares it (GeoJSON is WGS 84 by RFC 7946, but the officer must still confirm it). |
 | Shapefile | A `.zip` holding `.shp`, `.shx`, `.dbf`, optionally `.prj` and `.cpg`. Several layers are allowed. | `.prj`: an AUTHORITY tag, or the WGS 84 / UTM 29N names |
 | CSV with WKT | `.csv` with a column of WKT polygons, detected automatically or chosen in the wizard | Declared by the officer |
+| GeoPackage | `.gpkg`; every feature table listed in `gpkg_contents` is offered as a layer | `gpkg_spatial_ref_sys`: an EPSG code. Undefined systems (`srs_id` -1 or 0) and other organisations count as unknown |
 | LAIS ArcMap package | A `.zip` with `manifest.json` and a shapefile | `.prj`, cross-checked against the manifest |
 
 **Not imported directly**, with an explanation in the wizard:
 - **File geodatabase** (`.gdb`): needs Esri's FileGDB API or GDAL, neither of which is in the server stack. Export the layer with the ArcMap adapter, or as a shapefile or GeoJSON.
-- **GeoPackage** (`.gpkg`): needs a SQLite and GDAL adapter, not in the server stack.
 - **KML/KMZ, DWG/DXF, personal geodatabase** (`.mdb`): not supported.
 
 Uploads are untrusted. They are limited to:
@@ -38,7 +38,15 @@ Uploads are untrusted. They are limited to:
 - 60 archive entries and 5,000 features;
 - an allow-list of extensions inside archives, with safe member names (no paths, no traversal) and no duplicate layer names.
 
-Uploads are read in memory and never executed. The raw file is kept under a random key for 24 hours (`GIS_UPLOAD_RETENTION_HOURS`) so it can be previewed and retried, then deleted.
+Uploads are read in memory and never executed.
+
+**GeoPackages** are SQLite files, read with Node's built-in SQLite (no native add-on, no GDAL):
+- the file is copied to a fresh private temporary directory, which is deleted afterwards whatever happens;
+- it is opened read-only, with extension loading disabled and `trusted_schema` off, so no function inside the file runs;
+- only feature tables listed in `gpkg_contents` that exist as real tables are read, with quoted identifiers, and each table's row count is checked against the feature limit before it is read;
+- geometry blobs are unwrapped to standard WKB and parsed by PostGIS. Empty geometries and GeoPackage extended geometry types count as missing geometry and are rejected per record.
+
+Node marks its SQLite module as experimental (Node 22.13 and later, and Node 24, load it without a flag). On a Node.js without it, GeoPackage uploads are refused with an explanation. The raw file is kept under a random key for 24 hours (`GIS_UPLOAD_RETENTION_HOURS`) so it can be previewed and retried, then deleted.
 
 ## Coordinate reference systems
 
@@ -122,5 +130,5 @@ The submission records the snapshot hash of the submitted version, its validatio
 - Set official tolerances and area thresholds in `server/.env`, replacing the placeholders.
 - Replace the synthetic county boundaries with verified ones.
 - Agree the export procedure and the field mapping with the cadastral authority.
-- Decide whether file geodatabase or GeoPackage intake is needed. If so, add GDAL as a server-side adapter.
+- Decide whether file geodatabase intake is needed. If so, add GDAL with the OpenFileGDB driver as a server-side adapter.
 - For large volumes, move jobs from the API process to a dedicated worker. The job table already records everything a worker needs.

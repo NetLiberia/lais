@@ -4,6 +4,7 @@ import Papa from 'papaparse';
 import * as shapefile from 'shapefile';
 import { badRequest } from '../http.js';
 import { parseCrsMember } from './geojson.js';
+import { readGeoPackage } from './geopackage.js';
 
 /**
  * Reading uploaded GIS files. Everything here treats the upload as untrusted: archives are unpacked in
@@ -12,11 +13,12 @@ import { parseCrsMember } from './geojson.js';
  * metadata (a .prj file or a GeoJSON "crs" member), never guessed.
  *
  * Supported: GeoJSON, zipped shapefiles (.shp + .shx + .dbf, optional .prj/.cpg), CSV with a WKT geometry
- * column, and LAIS ArcMap export packages (a zipped shapefile with manifest.json). File geodatabases and
- * GeoPackages are refused with an explanation: no reader for them is installed on the server.
+ * column, GeoPackages (services/geopackage.ts) and LAIS ArcMap export packages (a zipped shapefile with
+ * manifest.json). File geodatabases are refused with an explanation: their format is proprietary and no
+ * reader for it is installed on the server.
  */
 
-export type SourceFormat = 'geojson' | 'shapefile' | 'csv_wkt' | 'arcmap_package';
+export type SourceFormat = 'geojson' | 'shapefile' | 'csv_wkt' | 'geopackage' | 'arcmap_package';
 
 export interface FieldInfo { name: string; type: string }
 export interface LayerInfo {
@@ -24,7 +26,7 @@ export interface LayerInfo {
   featureCount: number;
   fields: FieldInfo[];
   geometryTypes: string[];
-  crs: { epsg: number | null; name: string | null; source: 'prj' | 'geojson-crs' | 'none' };
+  crs: { epsg: number | null; name: string | null; source: 'prj' | 'geojson-crs' | 'gpkg' | 'none' };
   sample: Record<string, unknown>[];
   wktColumn?: string | null;
 }
@@ -47,7 +49,6 @@ export const LIMITS = {
 };
 
 export const UNSUPPORTED: Record<string, string> = {
-  '.gpkg': 'GeoPackage files cannot be imported here: no GeoPackage reader is installed on the server. Export the layer to a zipped shapefile or GeoJSON (in ArcMap, the LAIS sync tool does this).',
   '.gdb': 'File geodatabases cannot be read on the server. Use the LAIS ArcMap sync tool, which exports the feature class to a shapefile package, or export it to a zipped shapefile.',
   '.mdb': 'Personal geodatabases are not supported. Export the feature class to a zipped shapefile.',
   '.kml': 'KML is not supported for parcel import. Export to a zipped shapefile or GeoJSON with a declared CRS.',
@@ -224,8 +225,9 @@ function detectFormat(filename: string, buffer: Uint8Array): { format: SourceFor
   }
   if (ext === '.geojson' || ext === '.json') return { format: 'geojson', ext };
   if (ext === '.csv') return { format: 'csv_wkt', ext };
+  if (ext === '.gpkg') return { format: 'geopackage', ext };
   if (ext === '.shp') throw badRequest('Upload the shapefile as a ZIP containing the .shp, .shx, .dbf and .prj files together');
-  throw badRequest('Unsupported file type. Accepted: GeoJSON, a zipped shapefile, CSV with a WKT geometry column, or a LAIS ArcMap package');
+  throw badRequest('Unsupported file type. Accepted: GeoJSON, a zipped shapefile, CSV with a WKT geometry column, a GeoPackage, or a LAIS ArcMap package');
 }
 
 /** Opens an upload: its format, layers and (for packages) manifest. */
@@ -241,6 +243,20 @@ export async function openUpload(buffer: Uint8Array, filename: string, options: 
     const layer = readCsv(new TextDecoder().decode(buffer), path.basename(filename, path.extname(filename)), options.wktColumn);
     if (!layer.info.wktColumn) warnings.push('No column with WKT polygons was found. Choose the geometry column, or export polygons with WKT.');
     return { format: 'csv_wkt' as SourceFormat, layers: [layer], manifest: null, warnings };
+  }
+  if (format === 'geopackage') {
+    const layers: LayerData[] = (await readGeoPackage(buffer, LIMITS.maxFeatures)).map((g) => {
+      const features = g.rows.map((r) => ({ geometry: r.wkbHex ? { wkb: r.wkbHex } as Record<string, unknown> : null, properties: cleanProperties(r.properties) }));
+      return {
+        features,
+        info: {
+          name: g.name, featureCount: features.length, fields: g.fields, geometryTypes: [g.geometryType],
+          crs: { epsg: g.crs.epsg, name: g.crs.name, source: g.crs.epsg ? 'gpkg' : 'none' }, sample: features.slice(0, 5).map((f) => f.properties),
+        },
+      };
+    });
+    for (const l of layers) if (l.info.crs.epsg === null) warnings.push(`Layer "${l.info.name}" has an undefined coordinate reference system (${l.info.crs.name ?? 'no name'}): it must be declared with a reason.`);
+    return { format: 'geopackage' as SourceFormat, layers, manifest: null, warnings };
   }
   const files = unzipSafely(buffer);
   let manifest: Record<string, unknown> | null = null;

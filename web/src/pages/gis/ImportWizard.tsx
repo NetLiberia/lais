@@ -107,7 +107,7 @@ export function ImportWizard() {
                   <ul>{o.formats.filter((f) => !f.supported).map((f) => <li key={f.format}><strong>{f.format}</strong>: {f.reason}</li>)}</ul>
                 </details>
                 <p className="muted small">Files are treated as untrusted: archives are checked for unsafe names and contents, nothing in them is executed, and the upload is deleted after {24} hours. Up to {fmtBytes(o.limits.maxUploadBytes)}, {o.limits.maxFeatures} features.</p>
-                <label>File <input type="file" accept=".zip,.geojson,.json,.csv" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label>
+                <label>File <input type="file" accept=".zip,.geojson,.json,.csv,.gpkg" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label>
                 <button disabled={!file || busy} onClick={() => void upload()}><FileUp size={16} /> {busy ? 'Inspecting…' : 'Upload and inspect'}</button>
               </>
             )}

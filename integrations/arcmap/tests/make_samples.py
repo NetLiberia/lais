@@ -9,6 +9,7 @@ unsupported CRS (Web Mercator), then derives the files LAIS tests import:
   synthetic_parcels_noprj_shp.zip     the same shapefile without .prj (CRS unknown: must be declared)
   synthetic_parcels_utm29n_shp.zip    shapefile in UTM 29N
   synthetic_parcels_wkt_4326.csv      CSV with a WKT geometry column
+  synthetic_parcels_*.gpkg            GeoPackages in WGS 84, UTM 29N and Web Mercator
   synthetic_arcmap_package.zip        LAIS ArcMap package exported by the adapter
 All coordinates are invented and lie inside the synthetic Montserrado pilot boundary.
 """
@@ -97,6 +98,15 @@ def main(out):
         with arcpy.da.SearchCursor(fc4326, ['PARCEL_NO', 'CATEGORY', 'LANDUSE', 'SURVEYED', 'SHAPE@WKT']) as cur:
             for row in cur:
                 f.write(u'%s,%s,%s,%s,"%s"\n' % (row[0], row[1], row[2], row[3], row[4]))
+
+    # GeoPackages written by ArcGIS itself (WGS 84, UTM 29N, and Web Mercator, which LAIS must refuse).
+    for name, fc in [('synthetic_parcels_4326.gpkg', 'parcels_4326'), ('synthetic_parcels_utm29n.gpkg', 'parcels_utm29n'),
+                     ('synthetic_parcels_webmercator.gpkg', 'parcels_webmercator')]:
+        gpkg = os.path.join(out, name)
+        if os.path.exists(gpkg):
+            os.remove(gpkg)
+        arcpy.CreateSQLiteDatabase_management(gpkg, 'GEOPACKAGE')
+        arcpy.FeatureClassToFeatureClass_conversion(os.path.join(gdb, fc), gpkg, fc)
 
     package, manifest = lais.export_package(
         fc4326, 'CASE-SAMPLE-000001', 'MO',

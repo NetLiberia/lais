@@ -173,6 +173,30 @@ await check('versions: an attribute correction creates version 2; the comparison
   await shot(gis, 'versions-compare');
 });
 
+await check('import wizard: a GeoPackage states its own CRS (UTM 29N) and imports as version 3', async () => {
+  await gis.goto(`${BASE}/gis/import`);
+  await gis.locator('input[type=file]').setInputFiles(`${FIX}/gis/synthetic_parcels_utm29n.gpkg`);
+  await gis.getByRole('button', { name: 'Upload and inspect' }).click();
+  await gis.locator('option', { hasText: 'parcels_utm29n (3 features, MULTIPOLYGON)' }).waitFor({ state: 'attached' });
+  await gis.locator('.badge-pill', { hasText: 'geopackage' }).waitFor();
+  await gis.getByRole('cell', { name: 'PARCEL_NO' }).waitFor();
+  await gis.getByRole('button', { name: 'Next' }).click();
+  await pick(gis.getByLabel('Case', { exact: true }), migrationNo);
+  await gis.getByRole('button', { name: 'Next' }).click();
+  await gis.getByLabel('Source for legacy_ref').selectOption('PARCEL_NO');
+  await gis.getByLabel('Source for land_category').selectOption('CATEGORY');
+  await gis.getByRole('button', { name: 'Next' }).click();
+  await gis.getByText(/The file states/).waitFor();
+  await gis.getByText('EPSG:32629', { exact: true }).waitFor();
+  if (await gis.getByLabel('Declared coordinate system').count()) throw new Error('a CRS declaration was asked for although the file states one');
+  await gis.getByLabel(/I confirm the coordinate system/).check();
+  await shot(gis, 'import-gpkg-crs');
+  await gis.getByRole('button', { name: 'Preview' }).click();
+  await gis.getByRole('button', { name: 'Next' }).click();
+  await gis.getByRole('button', { name: 'Confirm import' }).click();
+  await gis.getByText(/Staged as version 3/).waitFor({ timeout: 30_000 });
+});
+
 await check('submit to supervisor: checklist, acknowledgement and snapshot', async () => {
   await gis.goto(`${BASE}/gis/submit?case=${regId}`);
   await gis.getByText('No blocking validation errors').waitFor();

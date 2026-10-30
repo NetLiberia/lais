@@ -153,6 +153,12 @@ export async function prepareRecords(db: Db, layer: LayerData, mapping: Partial<
         const { rows: [g] } = await db.query('SELECT ST_AsGeoJSON(ST_GeomFromText($1))::json AS g', [String(geometry.wkt).slice(0, 2_000_000)]);
         geometry = g.g;
       } catch { rejections.push({ record: i + 1, reason: 'WKT geometry could not be read' }); continue; }
+    } else if (geometry && 'wkb' in geometry) {
+      // GeoPackage geometry: standard WKB, parsed by PostGIS (parameterised, never interpolated).
+      try {
+        const { rows: [g] } = await db.query(`SELECT ST_AsGeoJSON(ST_GeomFromWKB(decode($1, 'hex')))::json AS g`, [String(geometry.wkb)]);
+        geometry = g.g;
+      } catch { rejections.push({ record: i + 1, reason: 'GeoPackage geometry could not be read' }); continue; }
     }
     if (!geometry) { rejections.push({ record: i + 1, reason: 'No geometry (null or empty)' }); continue; }
     if (!['Polygon', 'MultiPolygon'].includes(String(geometry.type))) { rejections.push({ record: i + 1, reason: `Geometry type ${String(geometry.type)} is not a parcel polygon` }); continue; }

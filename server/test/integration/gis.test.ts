@@ -126,9 +126,6 @@ describe.skipIf(!TEST_DB)('GIS workspace and ArcMap integration', () => {
     });
 
     it('explains unsupported formats instead of guessing', async () => {
-      const gpkg = await as('gis.mo').upload('/api/gis/uploads', Buffer.from('SQLite format 3\0'), 'parcels.gpkg');
-      expect(gpkg.status).toBe(400);
-      expect(gpkg.body.error).toMatch(/GeoPackage/i);
       const gdb = await as('gis.mo').upload('/api/gis/uploads', zipSync({ 'parcels.gdb/a00000001.gdbtable': strToU8('x') }), 'parcels.zip');
       expect(gdb.status).toBe(400);
       expect(gdb.body.error).toMatch(/geodatabase/i);
@@ -146,6 +143,78 @@ describe.skipIf(!TEST_DB)('GIS workspace and ArcMap integration', () => {
     it('lets only GIS officers upload', async () => {
       expect((await as('proc.mo').upload('/api/gis/uploads', onePolygon(), 'p.geojson')).status).toBe(403);
       expect((await as('sup.mo').upload('/api/gis/uploads', onePolygon(), 'p.geojson')).status).toBe(403);
+    });
+  });
+
+  describe('GeoPackage', () => {
+    let caseId: string;
+    beforeAll(async () => { caseId = (await newCase({ caseType: 'migration', countyId: 1, sourceReference: 'SYNTHETIC-GPKG' })).id; });
+
+    it('reads an ArcGIS-written GeoPackage: layers, fields and the CRS from gpkg_spatial_ref_sys', async () => {
+      const res = await inspect('synthetic_parcels_4326.gpkg');
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body.format).toBe('geopackage');
+      expect(res.body.layers).toHaveLength(1);
+      const layer = res.body.layers[0];
+      expect(layer).toMatchObject({ name: 'parcels_4326', featureCount: 3, geometryTypes: ['MULTIPOLYGON'], crs: { epsg: 4326, source: 'gpkg' } });
+      expect(layer.fields.map((f: any) => f.name)).toEqual(['PARCEL_NO', 'CATEGORY', 'LANDUSE', 'SURVEYED']);
+      expect(layer.sample[0]).toMatchObject({ PARCEL_NO: 'SYN-GIS-001', SURVEYED: 10000 });
+    });
+
+    it('imports a UTM 29N GeoPackage and keeps the input coordinates as received', async () => {
+      const key = (await inspect('synthetic_parcels_utm29n.gpkg')).body.uploadKey;
+      const job = await importAndWait(caseId, key, { fieldMapping: { legacy_ref: 'PARCEL_NO', land_category: 'CATEGORY' } });
+      expect(job.job).toMatchObject({ status: 'completed', source_format: 'geopackage', source_crs_detected: 32629, records_accepted: 3 });
+      const { rows } = await pool.query('SELECT ST_SRID(geom_input) AS s, properties FROM staging.feature WHERE batch_id = $1 ORDER BY feature_index', [job.job.batch_id]);
+      expect(rows[0].s).toBe(32629);
+      expect(rows[0].properties).toMatchObject({ legacy_ref: 'SYN-GIS-001', land_category: 'private' });
+      // The stored WGS 84 copy round-trips to the input within a centimetre: nothing was moved on the way in.
+      const { rows: [d] } = await pool.query(
+        'SELECT max(ST_HausdorffDistance(ST_Transform(f.geom, 32629), f.geom_input)) AS d FROM staging.feature f WHERE f.batch_id = $1', [job.job.batch_id]);
+      expect(Number(d.d)).toBeLessThan(0.01);
+    });
+
+    it('refuses an unsupported CRS, and needs a declared CRS with a reason when it is undefined', async () => {
+      const merc = await inspect('synthetic_parcels_webmercator.gpkg');
+      expect(merc.body.layers[0].crs.epsg).toBe(3857);
+      expect((await as('gis.mo').post('/api/gis/imports/preview', { caseId, uploadKey: merc.body.uploadKey })).status).toBe(400);
+
+      // The same file with its geometry column switched to the GeoPackage "undefined geographic" system.
+      const { DatabaseSync } = await import('node:sqlite');
+      const { copyFileSync, mkdtempSync, rmSync } = await import('node:fs');
+      const dir = mkdtempSync(path.join(tmpdir(), 'lais-test-gpkg-'));
+      const file = path.join(dir, 'undefined.gpkg');
+      copyFileSync(path.join(FIXTURES, 'gis', 'synthetic_parcels_4326.gpkg'), file);
+      const db = new DatabaseSync(file);
+      db.exec('UPDATE gpkg_geometry_columns SET srs_id = 0; UPDATE gpkg_contents SET srs_id = 0;');
+      db.close();
+      const undefinedCrs = await as('gis.mo').upload('/api/gis/uploads', readFileSync(file), 'undefined.gpkg');
+      rmSync(dir, { recursive: true, force: true });
+      expect(undefinedCrs.body.layers[0].crs).toMatchObject({ epsg: null, source: 'none', name: 'Undefined Geographic' });
+      expect(undefinedCrs.body.warnings.join(' ')).toMatch(/undefined coordinate reference system/);
+      const key = undefinedCrs.body.uploadKey;
+      expect((await as('gis.mo').post('/api/gis/imports/preview', { caseId, uploadKey: key, declaredCrs: 4326 })).status).toBe(400);
+      const ok = await as('gis.mo').post('/api/gis/imports/preview', { caseId, uploadKey: key, declaredCrs: 4326, crsExceptionReason: 'ArcGIS export settings recorded WGS 84 geographic' });
+      expect(ok.status).toBe(200);
+      expect(ok.body.accepted).toBe(3);
+    });
+
+    it('refuses SQLite files that are not GeoPackages and leaves no temporary copy behind', async () => {
+      const { mkdtempSync, readdirSync, rmSync } = await import('node:fs');
+      const before = readdirSync(tmpdir()).filter((n) => n.startsWith('lais-gpkg-')).length;
+      const notSqlite = await as('gis.mo').upload('/api/gis/uploads', Buffer.from('SQLite format 3 but not really'), 'parcels.gpkg');
+      expect(notSqlite.status).toBe(400);
+      expect(notSqlite.body.error).toMatch(/not a GeoPackage/);
+      const { DatabaseSync } = await import('node:sqlite');
+      const dir = mkdtempSync(path.join(tmpdir(), 'lais-test-sqlite-'));
+      const plain = new DatabaseSync(path.join(dir, 'plain.sqlite'));
+      plain.exec('CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1);');
+      plain.close();
+      const res = await as('gis.mo').upload('/api/gis/uploads', readFileSync(path.join(dir, 'plain.sqlite')), 'plain.gpkg');
+      rmSync(dir, { recursive: true, force: true });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/gpkg_ tables are missing/);
+      expect(readdirSync(tmpdir()).filter((n) => n.startsWith('lais-gpkg-')).length).toBe(before);
     });
   });
 

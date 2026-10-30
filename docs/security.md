@@ -59,7 +59,8 @@ GIS officers prepare spatial data in staging, in their own counties. Integration
   - Sizes, entries and features are limited.
   - Nothing in an upload is executed: no scripts, macros or tools.
   - Attribute values are kept as scalar text or numbers, limited to 100 per feature, and shown escaped in the interface.
-  - WKT is parsed by PostGIS in a parameterised query.
+  - WKT and WKB are parsed by PostGIS in parameterised queries.
+  - GeoPackages (SQLite files) are copied to a private temporary directory and opened read-only, with extension loading disabled and `trusted_schema` off. Only listed feature tables are read, with row counts checked first, and the copy is deleted afterwards.
   - Uploads are stored under random names outside the web root and deleted after the retention period.
 - **No silent CRS assignment.** Unknown CRS means the officer must declare it, give a reason (stored with the job) and confirm. The adapter refuses layers with no or unsupported CRS.
 - **Sync tokens instead of database credentials.** The ArcMap adapter has no database address, user or password; it holds only a personal LAIS token:

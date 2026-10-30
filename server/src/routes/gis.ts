@@ -269,6 +269,7 @@ gisRouter.get('/imports/options', (req, res) => {
       { format: 'geojson', label: 'GeoJSON (.geojson, .json)', supported: true },
       { format: 'shapefile', label: 'Shapefile in a .zip (.shp, .shx, .dbf, optional .prj and .cpg)', supported: true },
       { format: 'csv_wkt', label: 'CSV with a WKT geometry column (.csv)', supported: true },
+      { format: 'geopackage', label: 'GeoPackage (.gpkg), every feature table; CRS from gpkg_spatial_ref_sys', supported: true },
       { format: 'arcmap_package', label: 'LAIS ArcMap export package (.zip with manifest.json)', supported: true },
       ...Object.entries(UNSUPPORTED).map(([ext, why]) => ({ format: ext, label: ext, supported: false, reason: why })),
     ],

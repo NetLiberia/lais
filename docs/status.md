@@ -1,16 +1,16 @@
 # Implementation status
 
-As of 28 October 2026. "Verified" means it was exercised by automated tests, browser walkthroughs or a recorded manual run on PostgreSQL 18.6 with PostGIS 3.6.2 on Windows 11.
+As of 30 October 2026. "Verified" means it was exercised by automated tests, browser walkthroughs or a recorded manual run on PostgreSQL 18.6 with PostGIS 3.6.2 on Windows 11.
 
 ## Test results
 
 | Suite | Result |
 |---|---|
-| `npm test`: unit tests (policy, workflow, helpers, CSV safety, permission document) | 44 passed |
-| `npm test`: integration tests against a real PostgreSQL + PostGIS database, including 17 for supervision and 33 for the GIS workspace and ArcMap sync (`gis.test.ts`) | 143 passed |
+| `npm test`: unit tests (policy, workflow, helpers, CSV safety, permission document) | 50 passed |
+| `npm test`: integration tests against a real PostgreSQL + PostGIS database, including 17 for supervision and 37 for the GIS workspace and ArcMap sync (`gis.test.ts`) | 147 passed |
 | `npm test`: web component tests (shared dialogs and tables, permission-aware navigation, account creation, URL filters, supervisor dashboard empty and error states, return dialog, task moves, GIS dashboard, import CRS gating, submission blocking, one-time token display, UTM readout) in jsdom | 31 passed |
 | `npm run lint` (ESLint with typescript-eslint and the React hooks rules) | 0 errors, 0 warnings. `any` is an error outside test files |
-| `npm run e2e`: browser walkthroughs in Microsoft Edge (9 scripts, including the supervisor and GIS officer journeys) | 113 steps passed, 0 problems |
+| `npm run e2e`: browser walkthroughs in Microsoft Edge (9 scripts, including the supervisor and GIS officer journeys) | 114 steps passed, 0 problems |
 | ArcMap adapter with ArcPy 10.7 (ArcGIS Desktop 10.7.1) | Toolbox and CLI run against the live API; see [arcmap-integration.md](arcmap-integration.md#6-what-was-tested-and-how) |
 | `npm run backup:verify` on a backup taken through the interface | Restored and verified (see [backup-restore.md](backup-restore.md)) |
 | `npm run typecheck`, `npm run build` | Clean |
@@ -154,7 +154,7 @@ Full record: [prompt3-completion-report.md](prompt3-completion-report.md).
   - Layers: approved reference parcels, working staging, submitted staging, invalid geometry as received, overlap areas, duplicate identifiers and county boundary.
   - OpenStreetMap or no basemap, a scale bar, WGS 84 and UTM 29N coordinates, a legend and search.
 - **Data Import Center** (8 steps)
-  - Formats: GeoJSON, zipped shapefile, CSV with WKT and ArcMap packages. File geodatabase and GeoPackage are explained as unsupported.
+  - Formats: GeoJSON, zipped shapefile, CSV with WKT, GeoPackage (with every feature table offered as a layer) and ArcMap packages. File geodatabase is explained as unsupported.
   - An unknown CRS requires a declaration, a recorded reason and confirmation.
 - **Processing jobs**
   - Statuses: queued, running, completed, completed with warnings, failed, cancelled.
@@ -180,7 +180,8 @@ Full record: [prompt3-completion-report.md](prompt3-completion-report.md).
 
 | Item | Notes |
 |---|---|
-| File geodatabase / GeoPackage upload | No GDAL or FileGDB adapter on the server; use the ArcMap adapter or a shapefile/GeoJSON export. |
+| File geodatabase upload | Proprietary format; no FileGDB or GDAL adapter on the server. Use the ArcMap adapter, or a GeoPackage, shapefile or GeoJSON export. |
+| GeoPackage reader | Uses Node's built-in SQLite, which Node marks as experimental. |
 | Dedicated job worker | Jobs run asynchronously in the API process. |
 | ArcMap toolbox run from the ArcMap interface | Run through `arcpy.ImportToolbox` and the CLI with ArcPy 10.7; not by hand in the ArcMap interface. ArcGIS Pro not tested. |
 | Remote HTTPS sync | Tested against the local API over `http://localhost`. |

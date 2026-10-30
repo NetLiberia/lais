@@ -250,7 +250,7 @@ const BADGE_TONES: Record<string, string> = {
   urgent: 'danger', high: 'warn', normal: 'muted', low: 'muted', critical: 'danger', medium: 'info',
   // GIS jobs and submissions.
   queued: 'info', completed_with_warnings: 'warn', awaiting_supervisor: 'warn', accepted_by_supervisor: 'ok', information_requested: 'info',
-  shapefile: 'info', geojson: 'info', csv_wkt: 'info', arcmap_package: 'info',
+  shapefile: 'info', geojson: 'info', csv_wkt: 'info', geopackage: 'info', arcmap_package: 'info',
 };
 
 export function Badge({ value, label }: { value: string; label?: string }) {

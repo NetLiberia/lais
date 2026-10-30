@@ -23,7 +23,7 @@ This prototype runs on synthetic data. "Verified" below means exercised by autom
 | My GIS Tasks: acknowledge, begin, note, block, clarify, complete (not before the workflow step is done) | `/tasks/{id}/acknowledge`, `/claim`, `/clarification`; completion of preparation tasks refused until the case is submitted; conflict investigations need submitted findings | integration test, walkthrough |
 | Parcel Workspace map | Layers: approved reference, working, submitted, invalid geometry, overlaps, duplicate identifiers, county boundary. Also a basemap switch (OpenStreetMap or none), a scale bar, WGS 84 and UTM 29N coordinates (checked against ArcPy), a legend and search | integration test, web test, walkthrough |
 | Data Import Center, 8 steps | Upload & inspect → layer → target case → field mapping → CRS → preview → confirm → result with error report | web test (CRS gating), walkthrough |
-| Formats | GeoJSON, zipped shapefile, CSV with WKT, LAIS ArcMap package. File geodatabase and GeoPackage are explained as unsupported: no adapter in the server stack | integration tests |
+| Formats | GeoJSON, zipped shapefile, CSV with WKT, GeoPackage, LAIS ArcMap package. GeoPackage support was added after the first delivery (30 October), read with Node's built-in SQLite and tested with GeoPackages written by ArcGIS 10.7. File geodatabase is explained as unsupported: the format is proprietary and no adapter is in the server stack | integration and unit tests, walkthrough |
 | CRS: never silent | An unknown CRS needs a declaration, a 10+ character reason (stored on the job) and confirmation. Contradictions with file metadata and unsupported systems are refused | integration tests, web test, adapter run |
 | ArcMap 10.x adapter | `integrations/arcmap/`: `LAIS.pyt` toolbox, `lais_arcmap.py`, CLI. It checks polygons, CRS and fields; writes a shapefile with a manifest and a deterministic export ID; uploads with retry | ArcPy 10.7 runs, Python 3 run, integration tests |
 | Idempotent, safe retry | Export ID from a content hash. A unique index allows one completed job per case and export. A resend returns the earlier job. Retries are new jobs linked to the failed one. Interrupted jobs are failed at start-up | integration tests, live resend |
@@ -58,7 +58,8 @@ This prototype runs on synthetic data. "Verified" below means exercised by autom
 
 | Item | Status |
 |---|---|
-| File geodatabase and GeoPackage upload | Not supported: no GDAL or FileGDB adapter in the server stack. The wizard explains this and points to the ArcMap adapter or a shapefile/GeoJSON export. |
+| File geodatabase upload | Not supported: proprietary format, and no FileGDB or GDAL adapter in the server stack. The wizard explains this and points to the ArcMap adapter or a GeoPackage, shapefile or GeoJSON export. |
+| GeoPackage reader | Works, but relies on Node's SQLite module, which Node still marks as experimental. |
 | Job worker | Jobs run in the API process (asynchronously, with restart recovery), not in a separate worker. |
 | ArcMap toolbox dialog | The tools ran through `arcpy.ImportToolbox`, not by hand in the ArcMap interface. ArcGIS Pro's Python and other 10.x releases were not tested. |
 | Remote HTTPS deployment | The sync was tested against `http://localhost` only. |
