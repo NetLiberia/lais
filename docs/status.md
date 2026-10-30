@@ -7,10 +7,10 @@ As of 30 October 2026. "Verified" means it was exercised by automated tests, bro
 | Suite | Result |
 |---|---|
 | `npm test`: unit tests (policy, workflow, helpers, CSV safety, permission document) | 50 passed |
-| `npm test`: integration tests against a real PostgreSQL + PostGIS database, including 17 for supervision and 37 for the GIS workspace and ArcMap sync (`gis.test.ts`) | 147 passed |
-| `npm test`: web component tests (shared dialogs and tables, permission-aware navigation, account creation, URL filters, supervisor dashboard empty and error states, return dialog, task moves, GIS dashboard, import CRS gating, submission blocking, one-time token display, UTM readout) in jsdom | 31 passed |
+| `npm test`: integration tests against a real PostgreSQL + PostGIS database, including 17 for supervision, 37 for the GIS workspace and ArcMap sync (`gis.test.ts`) and 25 for application processing (`processor.test.ts`) | 172 passed |
+| `npm test`: web component tests (shared dialogs and tables, permission-aware navigation, account creation, URL filters, supervisor dashboard empty and error states, return dialog, task moves, GIS dashboard, import CRS gating, submission blocking, one-time token display, UTM readout, processor dashboard, duplicate review, restricted documents, read-only decision tracking) in jsdom | 36 passed |
 | `npm run lint` (ESLint with typescript-eslint and the React hooks rules) | 0 errors, 0 warnings. `any` is an error outside test files |
-| `npm run e2e`: browser walkthroughs in Microsoft Edge (9 scripts, including the supervisor and GIS officer journeys) | 114 steps passed, 0 problems |
+| `npm run e2e`: browser walkthroughs in Microsoft Edge (10 scripts, including the supervisor, GIS officer and processor journeys) | 129 steps passed, 0 problems |
 | ArcMap adapter with ArcPy 10.7 (ArcGIS Desktop 10.7.1) | Toolbox and CLI run against the live API; see [arcmap-integration.md](arcmap-integration.md#6-what-was-tested-and-how) |
 | `npm run backup:verify` on a backup taken through the interface | Restored and verified (see [backup-restore.md](backup-restore.md)) |
 | `npm run typecheck`, `npm run build` | Clean |
@@ -185,6 +185,37 @@ Full record: [prompt3-completion-report.md](prompt3-completion-report.md).
 | Dedicated job worker | Jobs run asynchronously in the API process. |
 | ArcMap toolbox run from the ArcMap interface | Run through `arcpy.ImportToolbox` and the CLI with ArcPy 10.7; not by hand in the ArcMap interface. ArcGIS Pro not tested. |
 | Remote HTTPS sync | Tested against the local API over `http://localhost`. |
+
+## Processor phase (Prompt 4)
+
+Full record: [prompt4-completion-report.md](prompt4-completion-report.md). The workflow is described in [application-processing.md](application-processing.md).
+
+### Implemented and verified
+
+- **Processor Dashboard**: 12 indicators with a period and county filter, each opening a filtered list, plus the officer's own applications.
+- **Registration wizard** (5 steps): applicant, application, declared parcel (unverified), documents, review and register.
+  - Drafts; registration-stage requirements.
+  - Unique office receipt numbers; possible duplicates held for a recorded review.
+- **Applicant management**: search with contact privacy, profiles, and corrections that keep previous values and need a reason. Identity reveals are audited.
+- **Document center**: content-sniffed PDF, PNG, JPEG and TIFF; versions that never overwrite; preview from a temporary in-memory copy; a repository with filters.
+- **Document verification**: administrative statuses, checks, reasons, referral and history. The uploader cannot review their own document.
+- **Completeness**: administrator-configured fields and documents with conditions and stages. It gates registration, the GIS handoff and submission. Supervisors can grant justified exceptions.
+- **Information requests**: channels and deadlines, honest delivery status (no provider, so nothing is sent), responses linked to documents, partial and satisfied, reopen and close with reasons, overdue.
+- **GIS handoff**: a checklist; creates a linked GIS task for an officer or the county queue; clarifications answered from the GIS Processing Queue.
+- **Returned applications** (validation, supervisor, registrar, GIS clarification), **registrar decision tracking** (read-only), the **application workspace** (14 tabs, provenance labelled), and a **workflow timeline** from stored events.
+- **Reports and Analytics**: charts and 10 reports (JSON, CSV, PDF) without personal data.
+- **Administration → Application Categories**: requirements configuration with versioned reasons.
+- **Database protection**: cases, documents and applicants are never deleted, and the case history and every new history table are append-only.
+
+### Partial or not implemented
+
+| Item | Notes |
+|---|---|
+| E-mail and SMS to applicants | No provider; requests are recorded as not sent, and staff record manual delivery. |
+| Notification preferences | Not supported; in-app notifications only. |
+| Retention and archival rules | Nothing is deleted; archival needs the authority's retention schedule. |
+| Districts and administrative areas | Free text; no reference list. |
+| Old cases | Cases opened directly (for example legacy migrations by GIS officers) are not intake applications, and the completeness gates do not apply to them. |
 
 ## Partial
 

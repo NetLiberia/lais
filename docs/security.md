@@ -52,6 +52,31 @@ GIS officers prepare spatial data in staging, in their own counties. Integration
 | Work in another county | `gis.workspace`, `case.import_geometry`, `conflict.investigate` and `gis.reports` are county-scoped, and jobs, layers and submissions are filtered by grant. An upload can be used only by the officer who sent it. |
 | Alter audit history | `audit.event` is append-only and hash-chained. |
 
+## Limits on the processor
+
+Processors register applications and process their documents, in their own counties. Integration tests (`server/test/integration/processor.test.ts`) check each limit.
+
+| The processor cannot | How it is enforced |
+|---|---|
+| Approve, reject or publish; change a registrar's decision | No processor role in `case.decide` or `case.publish`. Decision tracking is read-only and built from the registrar's records. Intake details are frozen by a trigger once a case is decided. |
+| Mark an application legally verified | There is no such status. Completeness is administrative, computed from configured requirements, and never creates a decision or verifies an identity. |
+| Edit geometry or GIS validation | No `case.import_geometry`, GIS upload or correction rights. The GIS handoff passes instructions and documents, never geometry. |
+| Override GIS or supervisor work | No route changes a GIS task's outcome or a supervisory review. A completeness exception needs a supervisor (`application.grant_exception`), with a reason. |
+| Review their own uploads | The uploader cannot record a document's acceptance or rejection (API check and database CHECK). |
+| Delete history or documents | Triggers refuse deleting documents, applicants, cases and handoffs, and refuse changing case events, reviews, requests, notes, exceptions, duplicate reviews and configuration changes. |
+| Reach another county | Applications, applicants, documents, requests, reports and the dashboard are scoped to the officer's grants. A county asked for outside them is refused and audited. |
+| Change permissions or configuration | Categories and requirements are configured by administrators only (`application_config.manage`). |
+
+**Privacy.**
+- Applicant contact details and identification references are separate permissions, masked otherwise. Search does not match on contact details for officers who may not see them, so they cannot be found by guessing.
+- Identity reveals are audited.
+- Audit details record which fields changed, never the values.
+- Reports leave out applicant names, contacts and identification.
+
+**Documents.**
+- Files are identified by content (PDF, PNG, JPEG, TIFF), stored privately under random names and hash-checked on every read.
+- They are served only through the authenticated, audited file route. Previews use a temporary in-memory copy, and there are no permanent public links.
+
 ## GIS data and the ArcMap adapter
 
 - **Uploads are untrusted input.**

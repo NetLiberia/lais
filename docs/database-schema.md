@@ -66,6 +66,26 @@ Migrations live in `server/db/migrations/` and are applied in order by `npm run 
 
 The append-only tables share the trigger function `lais.forbid_history_change()`. Two settings were added: `workflow.supervisor_review` and `workflow.stage_targets_days` (see [workflow.md](workflow.md)). The notification categories now also include `task`, `escalation` and `review`.
 
+### Application processing (migration 013)
+
+See [application-processing.md](application-processing.md).
+
+| Table or column | Purpose | Notes |
+|---|---|---|
+| `applicant` | Applicants (`APL-000001`): type, name, optional telephone, e-mail and address, optional identification type and reference, representative, county | Contact and identification are permission-gated. Never deleted (trigger); can be archived. Optional link to a verified `party`. |
+| `applicant_change` | Every change to an applicant: field, previous value, new value, reason, officer | Append-only. |
+| `application_category` | Configurable categories, each running on one case workflow (`case_type`) | Seeded with working defaults, not a statutory list. |
+| `application_requirement` | Required or optional fields and documents per category, with an optional condition and the stage (registration, GIS handoff, submission) | Changes are logged in `application_config_change` (append-only, with a reason). |
+| `land_case` intake columns | `applicant_id`, `category_code`, `intake_status` (draft or registered), purpose, submission date, receiving office, office receipt number (unique per county among live applications), declared parcel reference, title or deed reference, location, district, locality, declared land use, declared size and unit, survey reference, remarks, responsible processor | Declared values are unverified. Frozen once the case is decided or withdrawn (`land_case_application_protect`). Cases are never deleted, and `case_event` is now append-only. |
+| `application_duplicate_review` | Possible duplicates reviewed at registration, and why the application was registered anyway | Append-only. |
+| `document` columns | `document_no` (`DOC-000001`), title, description, `version_no`, `supersedes_id` (unique), `replacement_reason`, `review_status` | `document_protect`: documents are never deleted, their file and identity never change, and a superseded version stays superseded. |
+| `document_review_event` | Each administrative review: from and to status, checks made, note, referral, reviewer | Append-only. |
+| `info_request`, `info_request_event` | Requests to applicants (`IR-000001`): category, items, explanation, deadline, channel, delivery status (never "sent" without a provider), status; and their history (created, delivered, response recorded with documents, partially satisfied, satisfied, reopened, closed) | Requests are never deleted; events are append-only. |
+| `completeness_exception` | A supervisor's justified waiver of named requirements for one stage | Append-only. |
+| `application_handoff` | GIS handoffs (`HO-000001`): the GIS task created, instructions, documents, priority, the checklist as it stood, the exception relied on | Append-only. |
+| `application_note` | Administrative notes | Append-only. |
+| `application_requirement_states()`, `application_completeness()` | SQL functions computing the checklist and the completeness status | One definition for the API, the dashboards and the gates. |
+
 ### Views
 
 | View | Purpose |

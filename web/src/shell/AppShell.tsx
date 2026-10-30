@@ -6,6 +6,7 @@ import {
   FolderKanban, HardDrive, HelpCircle, History, KeyRound, Layers, LayoutDashboard, ListChecks, LogOut, Map, MapPinned, Menu, Moon, RefreshCw,
   ScrollText, Search, Settings, ShieldCheck, Siren, Sun, UserCircle2, Users, X,
   Upload, PlugZap, GitCompare, Send, Undo2, CircleCheckBig, Cog, Gauge, SlidersHorizontal,
+  FilePlus2, Files, FileSearch, FileWarning, MessageSquareMore, Gavel, Contact, UserCheck, ListTree,
 } from 'lucide-react';
 import { api, ROLE_LABELS } from '../api';
 import { useAuth } from '../auth';
@@ -43,12 +44,33 @@ const NAV: { heading: string; items: NavItem[] }[] = [
       { to: '/admin/parcels', label: 'Parcels & GIS', icon: <Map size={18} />, needs: ['dashboard.view'] },
       { to: '/admin/conflicts', label: 'Spatial Conflicts', icon: <AlertOctagon size={18} />, needs: ['dashboard.view'] },
       { to: '/admin/gis-sync', label: 'GIS Synchronization', icon: <RefreshCw size={18} />, needs: ['gis.sync.read'] },
+      { to: '/admin/application-config', label: 'Application Categories', icon: <ListChecks size={18} />, needs: ['application_config.manage'] },
       { to: '/gis/validation/rules', label: 'Validation Rules', icon: <SlidersHorizontal size={18} />, needs: ['validation.configure'] },
       { to: '/admin/document-categories', label: 'Document Categories', icon: <FileStack size={18} />, needs: ['system.configure'] },
       { to: '/admin/reports', label: 'Reports & Analytics', icon: <BarChart3 size={18} />, needs: ['reports.export'] },
       { to: '/admin/audit', label: 'Audit & Security Logs', icon: <ScrollText size={18} />, needs: ['audit.view_technical', 'audit.view_all'] },
       { to: '/admin/health', label: 'System Health', icon: <Activity size={18} />, needs: ['system.health'] },
       { to: '/admin/settings', label: 'Settings', icon: <Settings size={18} />, needs: ['system.configure'] },
+    ],
+  },
+  {
+    // LAIS processors: registering applications and processing their documents (administrative only).
+    heading: 'Application processing',
+    items: [
+      { to: '/processor', label: 'Overview', icon: <LayoutDashboard size={18} />, needs: ['application.register'], end: true },
+      { to: '/processor/new', label: 'New Application', icon: <FilePlus2 size={18} />, needs: ['application.register'] },
+      { to: '/processor/applications', label: 'All Applications', icon: <FolderKanban size={18} />, needs: ['application.register'], end: true },
+      { to: '/processor/mine', label: 'My Applications', icon: <UserCheck size={18} />, needs: ['application.register'] },
+      { to: '/processor/applicants', label: 'Applicant Management', icon: <Contact size={18} />, needs: ['application.register'] },
+      { to: '/processor/documents', label: 'Document Management', icon: <Files size={18} />, needs: ['application.register'] },
+      { to: '/processor/verification', label: 'Document Verification', icon: <FileSearch size={18} />, needs: ['application.review_document'] },
+      { to: '/processor/incomplete', label: 'Incomplete Applications', icon: <FileWarning size={18} />, needs: ['application.register'] },
+      { to: '/processor/info-requests', label: 'Information Requests', icon: <MessageSquareMore size={18} />, needs: ['info_request.manage'] },
+      { to: '/processor/gis-queue', label: 'GIS Processing Queue', icon: <Layers size={18} />, needs: ['application.handoff'] },
+      { to: '/processor/returned', label: 'Returned Applications', icon: <Undo2 size={18} />, needs: ['application.register'] },
+      { to: '/processor/decisions', label: 'Registrar Decision Tracking', icon: <Gavel size={18} />, needs: ['application.register'] },
+      { to: '/processor/history', label: 'Application History', icon: <ListTree size={18} />, needs: ['application.register'] },
+      { to: '/processor/reports', label: 'Reports and Analytics', icon: <BarChart3 size={18} />, needs: ['application.register'] },
     ],
   },
   {
@@ -111,6 +133,7 @@ function Breadcrumbs() {
   const section = pathname.startsWith('/admin') ? { to: '/admin', label: 'Administration' }
     : pathname.startsWith('/supervisor') || pathname.startsWith('/escalations') ? { to: '/supervisor', label: 'Supervision' }
     : pathname.startsWith('/gis') ? { to: '/gis', label: 'GIS workspace' }
+    : pathname.startsWith('/processor') ? { to: '/processor', label: 'Application processing' }
     : pathname.startsWith('/work') ? { to: '/work', label: 'Land administration' } : null;
   const leaf = CRUMBS.find(([re]) => re.test(pathname))?.[1] ?? (pathname === '/admin' ? 'Dashboard' : pathname === '/work' ? 'Cases' : null);
   return (

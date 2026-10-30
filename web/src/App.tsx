@@ -70,6 +70,20 @@ const SubmitWizard = named(() => import('./pages/gis/Submissions'), 'SubmitWizar
 const SubmissionsPage = named(() => import('./pages/gis/Submissions'), 'SubmissionsPage');
 const ReturnedPage = named(() => import('./pages/gis/Submissions'), 'ReturnedPage');
 const GisReports = named(() => import('./pages/gis/GisReports'), 'GisReports');
+// LAIS processor workspace.
+const ProcessorDashboard = named(() => import('./pages/processor/ProcessorDashboard'), 'ProcessorDashboard');
+const NewApplication = named(() => import('./pages/processor/NewApplication'), 'NewApplication');
+const ApplicationsPage = named(() => import('./pages/processor/Applications'), 'ApplicationsPage');
+const ApplicationWorkspacePage = named(() => import('./pages/processor/ApplicationWorkspace'), 'ApplicationWorkspacePage');
+const ApplicantsPage = named(() => import('./pages/processor/Applicants'), 'ApplicantsPage');
+const DocumentCenter = named(() => import('./pages/processor/DocumentCenter'), 'DocumentCenter');
+const InfoRequestsPage = named(() => import('./pages/processor/InfoRequests'), 'InfoRequestsPage');
+const GisQueuePage = named(() => import('./pages/processor/Tracking'), 'GisQueuePage');
+const ProcessorReturnedPage = named(() => import('./pages/processor/Tracking'), 'ReturnedPage');
+const DecisionsPage = named(() => import('./pages/processor/Tracking'), 'DecisionsPage');
+const HistoryPage = named(() => import('./pages/processor/Tracking'), 'HistoryPage');
+const ProcessorReportsPage = named(() => import('./pages/processor/ProcessorReports'), 'ProcessorReportsPage');
+const ApplicationConfigPage = named(() => import('./pages/admin/ApplicationConfigPage'), 'ApplicationConfigPage');
 
 const DOCREQUEST_ROLES = ['processor', 'registrar', 'supervisor', 'auditor'];
 
@@ -102,6 +116,7 @@ function Start() {
   if (hasRole('system_admin')) return <Navigate to="/admin" replace />;
   if (hasRole('supervisor')) return <Navigate to="/supervisor" replace />;
   if (hasRole('gis_officer')) return <Navigate to="/gis" replace />;
+  if (hasRole('processor')) return <Navigate to="/processor" replace />;
   if (hasRole(...INTERNAL_ROLES)) return <Navigate to="/work" replace />;
   if (hasRole('landowner')) return <Navigate to="/me" replace />;
   return <Navigate to="/" replace />;
@@ -191,6 +206,23 @@ export function App() {
       <Route path="/gis/submissions" element={<RequireSession needs={['gis.workspace']}><SubmissionsPage /></RequireSession>} />
       <Route path="/gis/returned" element={<RequireSession needs={['gis.workspace']}><ReturnedPage /></RequireSession>} />
       <Route path="/gis/reports" element={<RequireSession needs={['gis.reports']}><GisReports /></RequireSession>} />
+
+      <Route path="/processor" element={<RequireSession needs={['application.register']}><ProcessorDashboard /></RequireSession>} />
+      <Route path="/processor/new" element={<RequireSession needs={['application.register']}><NewApplication /></RequireSession>} />
+      <Route path="/processor/applications" element={<RequireSession needs={['case.view']}><ApplicationsPage preset="all" /></RequireSession>} />
+      <Route path="/processor/mine" element={<RequireSession needs={['application.register']}><ApplicationsPage preset="mine" /></RequireSession>} />
+      <Route path="/processor/incomplete" element={<RequireSession needs={['case.view']}><ApplicationsPage preset="incomplete" /></RequireSession>} />
+      <Route path="/processor/applications/:id" element={<RequireSession needs={['case.view']}><ApplicationWorkspacePage /></RequireSession>} />
+      <Route path="/processor/applicants" element={<RequireSession needs={['applicant.view']}><ApplicantsPage /></RequireSession>} />
+      <Route path="/processor/documents" element={<RequireSession needs={['case.view']}><DocumentCenter mode="repository" /></RequireSession>} />
+      <Route path="/processor/verification" element={<RequireSession needs={['application.review_document']}><DocumentCenter mode="verification" /></RequireSession>} />
+      <Route path="/processor/info-requests" element={<RequireSession needs={['info_request.view']}><InfoRequestsPage /></RequireSession>} />
+      <Route path="/processor/gis-queue" element={<RequireSession needs={['case.view']}><GisQueuePage /></RequireSession>} />
+      <Route path="/processor/returned" element={<RequireSession needs={['case.view']}><ProcessorReturnedPage /></RequireSession>} />
+      <Route path="/processor/decisions" element={<RequireSession needs={['case.view']}><DecisionsPage /></RequireSession>} />
+      <Route path="/processor/history" element={<RequireSession needs={['case.view']}><HistoryPage /></RequireSession>} />
+      <Route path="/processor/reports" element={<RequireSession needs={['reports.processing']}><ProcessorReportsPage /></RequireSession>} />
+      <Route path="/admin/application-config" element={<RequireSession needs={['application_config.view']}><ApplicationConfigPage /></RequireSession>} />
 
       <Route path="/escalations"element={<RequireSession needs={['escalation.view', 'escalation.view_system']}><EscalationsPage /></RequireSession>} />
       <Route path="/notifications" element={<RequireSession><NotificationsPage /></RequireSession>} />

@@ -7,6 +7,9 @@ export function setCsrfToken(token: string | null) {
   csrfToken = token;
 }
 
+/** The session's CSRF token, for requests made outside api() (uploads with progress). */
+export const getCsrfToken = () => csrfToken;
+
 export class ApiError extends Error {
   constructor(
     public status: number,

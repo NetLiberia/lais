@@ -165,6 +165,29 @@ processorRouter.get('/gis-queue', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Application history: recent workflow events across the applications in scope
+// ---------------------------------------------------------------------------
+
+const activityQuery = z.object({
+  countyId: countyParam, q: z.string().trim().max(60).optional(), actor: z.enum(['me', 'all']).default('all'),
+  page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+processorRouter.get('/activity', async (req, res) => {
+  const q = activityQuery.parse(req.query);
+  const counties = resolveScope(req, 'case.view', q.countyId);
+  const { rows } = await pool.query(
+    `SELECT e.id, e.action, e.from_status, e.to_status, e.note, e.at, u.username AS actor, c.id AS case_id, c.case_no, count(*) OVER () AS total
+       FROM lais.case_event e JOIN lais.land_case c ON c.id = e.case_id LEFT JOIN lais.app_user u ON u.id = e.actor_id
+      WHERE c.applicant_id IS NOT NULL AND ($1::smallint[] IS NULL OR c.county_id = ANY($1))
+        AND ($2::text IS NULL OR c.case_no ILIKE '%' || $2 || '%' OR e.action ILIKE '%' || $2 || '%') AND ($3::uuid IS NULL OR e.actor_id = $3)
+      ORDER BY e.at DESC, e.id DESC LIMIT $4 OFFSET $5`,
+    [counties, q.q || null, q.actor === 'me' ? req.auth!.user.id : null, q.pageSize, (q.page - 1) * q.pageSize],
+  );
+  res.json({ items: rows.map(({ total: _t, ...r }) => r), total: Number(rows[0]?.total ?? 0), page: q.page, pageSize: q.pageSize });
+});
+
+// ---------------------------------------------------------------------------
 // Analytics (charts) and reports
 // ---------------------------------------------------------------------------
 
@@ -333,4 +356,5 @@ processorRouter.get('/reports/:key', async (req, res) => {
 });
 
 documentQuery('GET /processor/summary', summaryQuery);
+documentQuery('GET /processor/activity', activityQuery);
 documentQuery(['GET /processor/analytics', 'GET /processor/reports/{key}', 'GET /processor/reports/{key}.csv', 'GET /processor/reports/{key}.pdf'], filterQuery);

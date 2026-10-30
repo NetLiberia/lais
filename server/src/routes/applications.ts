@@ -493,6 +493,9 @@ applicationsRouter.get('/:id/timeline', async (req, res) => {
     `SELECT * FROM (
        SELECT 'case' AS source, e.action AS event, e.at, u.username AS actor, e.from_status, e.to_status, e.note
          FROM lais.case_event e LEFT JOIN lais.app_user u ON u.id = e.actor_id WHERE e.case_id = $1
+          -- Document reviews and information-request steps have their own, more detailed events below.
+          AND e.action NOT IN ('review_document', 'request_information', 'information_received')
+          AND e.action NOT LIKE 'information%'
        UNION ALL
        SELECT 'document', 'document_' || e.to_status, e.at, u.username, e.from_status, e.to_status, d.document_no || coalesce(': ' || e.note, '')
          FROM lais.document_review_event e JOIN lais.document d ON d.id = e.document_id JOIN lais.app_user u ON u.id = e.actor_id WHERE e.case_id = $1
@@ -500,9 +503,11 @@ applicationsRouter.get('/:id/timeline', async (req, res) => {
        SELECT 'info_request', 'information_' || e.action, e.at, u.username, e.from_status, e.to_status, i.request_no || coalesce(': ' || e.note, '')
          FROM lais.info_request_event e JOIN lais.info_request i ON i.id = e.request_id JOIN lais.app_user u ON u.id = e.actor_id WHERE i.case_id = $1
        UNION ALL
-       SELECT 'gis', 'gis_task_' || e.action, e.at, u.username, e.from_value, e.to_value, t.task_no || coalesce(': ' || e.note, '')
+       SELECT 'gis', 'gis_task_' || e.action, e.at, u.username, coalesce(fu.username, e.from_value), coalesce(tu.username, e.to_value), t.task_no || coalesce(': ' || e.note, '')
          FROM lais.task_event e JOIN lais.task t ON t.id = e.task_id JOIN lais.application_handoff h ON h.task_id = t.id
-         JOIN lais.app_user u ON u.id = e.actor_id WHERE h.case_id = $1 AND e.action IN ('created', 'acknowledged', 'claimed', 'status_changed', 'completed', 'clarification_requested', 'comment', 'returned')
+         JOIN lais.app_user u ON u.id = e.actor_id
+         -- Assignment events store user ids: show the username instead.
+         LEFT JOIN lais.app_user fu ON fu.id::text = e.from_value LEFT JOIN lais.app_user tu ON tu.id::text = e.to_value WHERE h.case_id = $1 AND e.action IN ('created', 'acknowledged', 'claimed', 'status_changed', 'completed', 'clarification_requested', 'comment', 'returned')
        UNION ALL
        SELECT 'supervision', 'supervisor_' || s.decision, s.created_at, u.username, NULL, s.decision, s.notes
          FROM lais.supervisory_review s JOIN lais.app_user u ON u.id = s.reviewer_id WHERE s.case_id = $1

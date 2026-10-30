@@ -487,3 +487,141 @@ export interface RuleSet {
   rules: ValidationRule[]; currentVersion: number | null; canConfigure: boolean;
   history: { version: number; changed_by_username: string | null; changed_at: string; rule_code: string | null; from_value: string | null; to_value: string | null; reason: string }[];
 }
+
+// ---------------------------------------------------------------------------
+// Processor phase (server/src/routes/applications.ts, applicationWork.ts, applicants.ts, processor.ts)
+// ---------------------------------------------------------------------------
+
+export type Completeness = 'draft' | 'awaiting_information' | 'incomplete' | 'ready_for_review' | 'complete';
+export type DocReviewStatus = 'not_reviewed' | 'under_review' | 'accepted' | 'incomplete' | 'unreadable' | 'inconsistent' | 'requires_clarification' | 'superseded';
+export interface ProcessorKpis {
+  total_registered: number; new_in_period: number; awaiting_document_review: number; complete: number; incomplete: number; awaiting_information: number;
+  awaiting_gis: number; gis_processing: number; returned: number; awaiting_registrar: number; completed_in_period: number; overdue_tasks: number; my_open: number;
+}
+export interface ProcessorSummary { kpis: ProcessorKpis; range: { from: string; to: string }; refreshedAt: string }
+export interface RequirementDef {
+  id: string; category_code: string; kind: 'field' | 'document'; field_key: string | null; doc_category: string | null; doc_label: string | null;
+  mandatory: boolean; condition_field: string | null; condition_value: string | null; stage: 'registration' | 'gis_handoff' | 'submission'; note: string | null;
+}
+export interface ApplicationCategory { code: string; label: string; description: string | null; case_type: CaseType; requirements: RequirementDef[] }
+export interface ApplicationRow {
+  id: string; case_no: string; case_type: CaseType; category_code: string; category_label: string | null; status: string; intake_status: 'draft' | 'registered';
+  county_id: number; county_code: string; submission_date: string | null; created_at: string; updated_at: string; declared_parcel_ref: string | null;
+  external_reference: string | null; priority: string; applicant_id: string; applicant_no: string; applicant_name: string; assigned_processor_id: string | null;
+  assigned_processor: string | null; completeness: Completeness | null; stage: string; handoff_no: string | null; task_no: string | null; open_requests: number;
+}
+export interface ApplicationList extends Paged<ApplicationRow> { stageLabels: Record<string, string>; completenessLabels: Record<string, string> }
+export interface RequirementState {
+  requirement_id: string; req_key: string; kind: 'field' | 'document'; label: string; stage: 'registration' | 'gis_handoff' | 'submission';
+  mandatory: boolean; applies: boolean; state: 'complete' | 'missing' | 'received' | 'unreadable' | 'incomplete' | 'clarification'; waived_for: string[];
+}
+export interface CompletenessResult {
+  status: Completeness | null; label: string; items: RequirementState[];
+  blocking: { gis_handoff: RequirementState[]; submission: RequirementState[] }; notice: string;
+}
+export interface ApplicationDoc {
+  id: string; document_no: string; doc_type: string; doc_label: string | null; title: string | null; reference_no: string | null; classification: Classification;
+  mime_type: string; size_bytes: number; original_name: string | null; version_no: number; supersedes_id: string | null; replacement_reason: string | null;
+  review_status: DocReviewStatus; verification_status: string; verification_note: string | null; uploaded_at: string; uploaded_by: string; uploaded_by_id: string;
+  last_review: { status: string; note: string | null; by: string; at: string; referred: boolean } | null; restricted?: boolean;
+}
+export interface InfoRequestRow {
+  id: string; request_no: string; case_id?: string; case_no?: string; applicant_no?: string | null; applicant_name?: string | null; category: string; items: string;
+  status: 'pending' | 'response_received' | 'partially_satisfied' | 'satisfied' | 'closed'; channel: string;
+  delivery_status: 'not_sent_no_provider' | 'awaiting_manual_delivery' | 'delivered_manually'; due_date: string | null; created_at: string; requested_by: string;
+  overdue: boolean; county_code?: string; last_response_at?: string | null;
+}
+export interface InfoRequestDetail extends InfoRequestRow {
+  explanation: string; internal_note: string | null; delivered_note: string | null; doc_categories: string[];
+  events: { action: string; from_status: string | null; to_status: string | null; note: string | null; response_channel: string | null; at: string; actor: string; document_nos: string[] | null }[];
+}
+export interface HandoffRow {
+  id: string; handoff_no: string; task_type: string; instructions: string; priority: string; created_at: string; processor: string; task_id: string; task_no: string;
+  task_status: string; gis_officer: string | null; with_exception: boolean; last_clarification: string | null;
+}
+export interface ApplicationWorkspace {
+  application: LandCase & {
+    applicant_id: string | null; category_code: string | null; intake_status: 'draft' | 'registered'; purpose: string | null; submission_date: string | null;
+    receiving_office: string | null; external_reference: string | null; declared_parcel_ref: string | null; title_deed_ref: string | null;
+    location_description: string | null; district: string | null; locality: string | null; declared_land_use: string | null; declared_area: string | null;
+    declared_area_unit: string | null; survey_reference: string | null; remarks: string | null; assigned_processor_id: string | null; priority: string;
+    stage: string; stage_label: string; category_label: string | null; county_code: string; county_name: string; assigned_processor: string | null;
+    created_by_username: string; parcel_upi: string | null;
+  };
+  applicant: (ApplicantSummary & { contactHidden: boolean }) | null;
+  documents: ApplicationDoc[];
+  infoRequests: InfoRequestRow[];
+  handoffs: HandoffRow[];
+  gis: { version_no: number | null; feature_count: number | null; declared_srid: number | null; version_at: string | null; error_count: number | null; warning_count: number | null; validated_at: string | null } | null;
+  supervisoryReviews: { decision: string; notes: string; instructions: string | null; issue_categories: string[]; created_at: string; reviewer: string }[];
+  decisions: { decision: string; reason: string; decided_at: string; superseded_at: string | null; registrar: string }[];
+  notes: { id: string; note: string; at: string; author: string }[];
+  exceptions: { id: string; stage: string; requirement_keys: string[]; reason: string; granted_at: string; granted_by: string }[];
+  duplicateReviews: { match_reason: string; reason: string; reviewed_at: string; similar_case_no: string; reviewed_by: string }[];
+  completeness: CompletenessResult | null;
+  can: { edit: boolean; upload: boolean; reviewDocuments: boolean; requestInformation: boolean; handoff: boolean; grantException: boolean; submit: boolean; note: boolean; assign: boolean; viewAudit: boolean };
+  separation: string;
+}
+export interface ApplicantSummary {
+  id: string; applicant_no: string; applicant_type: string; name: string; phone: string | null; email: string | null; address: string | null;
+  id_document_type: string | null; has_id_reference: boolean; representative_name: string | null; representative_role: string | null;
+  representative_phone: string | null; status: string; party_id: string | null;
+}
+export interface ApplicantRow {
+  id: string; applicant_no: string; applicant_type: string; name: string; phone: string | null; email: string | null; county_id: number; county_code: string;
+  status: string; created_at: string; updated_at: string; applications: number; contactMasked?: boolean;
+}
+export interface ApplicantProfile {
+  applicant: ApplicantSummary & { county_id: number; created_at: string; updated_at: string; contactMasked: boolean };
+  applications: { id: string; case_no: string; category_code: string; category_label: string | null; status: string; intake_status: string; created_at: string; declared_parcel_ref: string | null; county_code: string; completeness: Completeness | null }[];
+  documents: { id: string; document_no: string; doc_type: string; classification: string; review_status: DocReviewStatus; version_no: number; uploaded_at: string; case_no: string }[];
+  openRequests: { id: string; request_no: string; items: string; status: string; channel: string; delivery_status: string; due_date: string | null; case_no: string }[];
+  history: { field: string; old_value: string | null; new_value: string | null; reason: string | null; changed_at: string; changed_by: string }[];
+  can: { manage: boolean; revealIdentity: boolean };
+}
+export interface RepoDocument {
+  id: string; document_no: string; doc_type: string; doc_label: string | null; title: string | null; original_name: string | null; mime_type: string; size_bytes: number;
+  classification: Classification; version_no: number; review_status: DocReviewStatus; uploaded_at: string; uploaded_by: string; case_id: string; case_no: string;
+  county_id: number; county_code: string; applicant_no: string | null; restricted?: boolean;
+}
+export interface DocumentDetailResponse {
+  document: {
+    id: string; document_no: string; doc_type: string; doc_label: string | null; title: string | null; description: string | null; reference_no: string | null;
+    issuer: string | null; issued_on: string | null; classification: Classification; mime_type: string; size_bytes: number; original_name: string | null; sha256: string;
+    version_no: number; review_status: DocReviewStatus; uploaded_at: string; uploaded_by: string; uploaded_by_id: string; case_id: string; case_no: string;
+    previewable: boolean; restricted: boolean;
+  };
+  versions: { id: string; document_no: string; version_no: number; review_status: DocReviewStatus; uploaded_at: string; replacement_reason: string | null; uploaded_by: string }[];
+  history: { from_status: string | null; to_status: string; checks: Record<string, boolean>; note: string | null; referred: boolean; at: string; reviewer: string }[];
+  can: { download: boolean; review: boolean; replace: boolean };
+  notice: string;
+}
+export interface TimelineEvent { source: string; event: string; at: string; actor: string | null; from_status: string | null; to_status: string | null; note: string | null }
+export interface ReturnedApplication {
+  id: string; case_no: string; county_id: number; status: string; priority: string; due_date: string | null; processor: string | null; applicant_no: string;
+  applicant_name: string; source: 'validation' | 'registrar' | 'supervisor' | 'gis_officer' | 'other'; returned_at: string | null; reason: string | null;
+  returned_by: string | null; instructions: string | null; issue_categories: string[] | null; documents: number; task_no: string | null;
+}
+export interface DecisionTrackingRow {
+  id: string; case_no: string; county_code: string; parcel_upi: string | null; declared_parcel_ref: string | null; submitted_at: string; decision: string | null;
+  decided_at: string | null; decision_summary: string | null; registrar: string | null; supervisor_decision: string | null; supervisor_at: string | null;
+  tracking_status: string; status: string;
+}
+export interface GisQueueRow {
+  id: string; handoff_no: string; created_at: string; task_type: string; priority: string; case_id: string; case_no: string; case_status: string; county_code: string;
+  task_id: string; task_no: string; task_status: string; due_date: string | null; gis_officer: string | null; processor: string; version_no: number | null;
+  error_count: number | null; warning_count: number | null; last_clarification: string | null;
+}
+export interface ProcessorAnalytics {
+  range: { from: string; to: string };
+  registeredOverTime: { day: string; registered: number }[]; byCategory: { label: string; count: number }[]; byStage: { stage: string; label: string; count: number }[];
+  missingDocuments: { label: string; count: number }[]; infoRequests: { status: string; count: number }[]; handoffsOverTime: { day: string; handoffs: number }[];
+  returnsBySource: { source: string; count: number }[]; processing: { avg_days_to_submission: string | null; submitted: number; awaiting_registrar: number };
+}
+export interface ApplicationConfig {
+  categories: { code: string; label: string; description: string | null; case_type: CaseType; active: boolean; sort_order: number; updated_at: string }[];
+  requirements: (Omit<RequirementDef, 'doc_label'> & { doc_label: string | null; active: boolean; updated_at: string })[];
+  history: { id: string; entity: string; entity_key: string; change: Record<string, unknown>; reason: string; changed_at: string; changed_by_username: string }[];
+  documentCategories: { code: string; label: string }[]; fieldKeys: string[]; caseTypes: CaseType[]; canManage: boolean; notice: string;
+}
+export interface ActivityRow { id: string; action: string; from_status: string | null; to_status: string | null; note: string | null; at: string; actor: string | null; case_id: string; case_no: string }

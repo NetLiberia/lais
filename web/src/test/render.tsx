@@ -27,8 +27,8 @@ export function stubApi(routes: Record<string, Handler>) {
       const value = typeof handler === 'function' ? (handler as (i: RequestInit | undefined, u: URL) => unknown)(init, url) : handler;
       return new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });
     } catch (e) {
-      const { status = 500, error = 'error' } = e as { status?: number; error?: string };
-      return new Response(JSON.stringify({ error }), { status, headers: { 'content-type': 'application/json' } });
+      const { status = 500, error = 'error', details } = e as { status?: number; error?: string; details?: unknown };
+      return new Response(JSON.stringify({ error, details }), { status, headers: { 'content-type': 'application/json' } });
     }
   });
   vi.stubGlobal('fetch', fetchMock);

@@ -37,6 +37,7 @@ Phase 3 prototype for the MSc project *Development and Evaluation of a Privacy-A
 | GIS synchronization monitoring, settings, document categories, backups with a restore check, CSV reports, in-app notifications, global search, and an audit view limited to technical events | `pages/admin/`, `routes/adminOps.ts` |
 | OpenAPI 3.1 description generated from the routers (`/api/openapi.json`), with request bodies and query parameters taken from the handlers' own Zod schemas; structured JSON logs and request correlation IDs | `openapi.ts`, `logger.ts` |
 | Supervisor dashboard: live KPIs and charts in the supervisor's county scope, an application work queue, GIS quality review (accept, return for correction with categories and records, request information) with a review map, spatial conflict review, tasks with a Kanban board, staff workload, overdue work and bottlenecks, 12 audited reports, escalations and activity history. Quality acceptance is not legal approval; the administrator decides whether it is required before a registrar's approval | `pages/supervisor/`, `routes/supervision*.ts`, `routes/tasks.ts`, `routes/escalations.ts`, `010_supervision.sql`, [docs/workflow.md](docs/workflow.md) |
+| LAIS processor workspace:<br>• a dashboard with 12 indicators;<br>• a 5-step registration wizard (applicants with minimised, permission-gated contact and identity data; declared parcel details labelled unverified; possible-duplicate review; unique office receipt numbers);<br>• applicant management with change history, and a document center (content-sniffed PDF, PNG, JPEG and TIFF; versions never overwritten; in-browser preview without permanent links; administrative review with history and referral);<br>• completeness against administrator-configured requirements, gating registration, the GIS handoff and submission (supervisor exceptions only, justified);<br>• information requests (never claimed as sent: no provider), the GIS handoff creating linked GIS tasks, returned applications, read-only registrar decision tracking, a timeline from stored events, and 10 reports (JSON, CSV, PDF) | `pages/processor/`, `routes/applications.ts`, `routes/applicationWork.ts`, `routes/applicants.ts`, `routes/processor.ts`, `routes/applicationConfig.ts`, `services/applications.ts`, `013_processor.sql`, [docs/application-processing.md](docs/application-processing.md) |
 | Landowner document requests: a landowner asks for copies on a parcel where they hold a registered interest; a processor chooses verified documents from published cases; a different registrar approves or refuses with a reason; copies can be downloaded for `DOCUMENT_RELEASE_DAYS`. Eligibility is re-checked at every download, highly sensitive documents are never released (enforced in the database too), and every download is audited | `routes/me.ts`, `routes/documentRequests.ts`, `005_document_requests.sql` |
 
 ## Architecture
@@ -134,9 +135,18 @@ npm test
   - versioned rule configuration applied to runs;
   - GIS tasks, conflict investigation, dashboard, layers and reports.
 
-Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 197 server tests in about 75 seconds with the default 10-connection pool.
+- **25 processor integration tests** (`processor.test.ts`). They cover:
+  - registration: valid, duplicate receipt number, required fields, drafts, county limits, possible duplicates held for a recorded review;
+  - applicants: search with contact privacy, county isolation, corrections that keep previous values, audited identity reveal;
+  - documents: content sniffing (TIFF accepted, disguised files refused), download limits, versions never overwritten, review history and separation of duties;
+  - completeness, information requests (never claimed as sent) and supervisor exceptions;
+  - the GIS handoff creating a linked task, no geometry access, and GIS clarifications;
+  - submission gated by requirements, no decisions or publication by processors, and decision tracking from the registrar's records;
+  - dashboard figures against the database, filters, reports without personal data, and administrator-only configuration.
 
-`npm test` also runs **31 web component tests** (Vitest, Testing Library, jsdom). They cover:
+Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 222 server tests in about 45 to 75 seconds with the default 10-connection pool.
+
+`npm test` also runs **36 web component tests** (Vitest, Testing Library, jsdom). They cover:
 - the shared dialogs: a reason is required, server refusals are shown, and focus stays where the user is typing;
 - tables and paging;
 - the navigation each role sees;
@@ -146,11 +156,12 @@ Verified on PostgreSQL 18.6 + PostGIS 3.6.2 (Windows): 197 server tests in about
   - the import wizard will not preview data with an unknown CRS until it is declared, explained and confirmed;
   - submission is impossible with blocking errors;
   - a sync token is shown once;
-  - the UTM 29N readout matches ArcPy to the centimetre.
+  - the UTM 29N readout matches ArcPy to the centimetre;
+- the processor pages: dashboard figures and error state, the duplicate review in the registration wizard, a highly sensitive document hidden from an officer without permission, and read-only decision tracking.
 
 `npm run lint` runs ESLint over the API, the web app and the walkthroughs. API responses are typed in `web/src/types.ts`, and `any` is a lint error outside test files.
 
-**Browser walkthroughs.** With the API and web app running, `npm run e2e` drives Microsoft Edge through nine scripted journeys: registration, subdivision, document requests, corrections, legacy migration, confirmation, the administrator dashboard, the supervisor dashboard and the GIS officer workspace. It resets the development database before each one. Set `LAIS_WEB_URL` if the web app is not on port 5173, and `BROWSER_PATH` for another Chromium browser. Screenshots go to `e2e/shots/`. Last run: 114 steps, 0 problems.
+**Browser walkthroughs.** With the API and web app running, `npm run e2e` drives Microsoft Edge through ten scripted journeys: registration, subdivision, document requests, corrections, legacy migration, confirmation, the administrator dashboard, the supervisor dashboard, the GIS officer workspace and the processor workspace. It resets the development database before each one. Set `LAIS_WEB_URL` if the web app is not on port 5173, and `BROWSER_PATH` for another Chromium browser. Screenshots go to `e2e/shots/`. Last run: 129 steps, 0 problems.
 
 **Backups.** `npm run backup:verify -w server -- <file>` restores a backup into `TEST_DATABASE_URL` and checks it (see [docs/backup-restore.md](docs/backup-restore.md)).
 
@@ -190,6 +201,12 @@ Other fixtures: `adjacent_touching` (expected: no conflict), `duplicate_of_mo5`,
 
 **Document request:** documents can be released only from published cases, and seeded parcels have none. So first publish a transfer of, for example, PROV-MO-000010 to *Musu Testperson*, with a verified deed. Then sign in as owner.demo → *My land* → *Request documents*. proc.mo prepares the release under *Document requests*, reg.mo decides, and owner.demo downloads the copy.
 
+**Processor:** sign in as proc.mo, which opens the *LAIS Processor Dashboard*. Then:
+1. *New Application*: record a new applicant, choose *First registration*, declare the parcel (it stays unverified), save the draft, upload a survey plan, deed and identity document, and register.
+2. Sign in as proc2.mo and accept the documents under *Document Verification* (proc.mo cannot review their own uploads).
+3. In the application workspace, the *Completeness* tab shows the checklist. *Information requests* records a request (e-mail is shown as **not sent**: no provider), and *GIS processing* hands the application to the county GIS queue.
+4. As admin, *Application Categories* changes what each category requires, with a reason.
+
 **GIS officer:** sign in as gis.mo, which opens the *GIS Officer Dashboard*. Then:
 1. Open a *Legacy migration* case under Cases.
 2. In the *Data Import Center*, upload `server/fixtures/gis/synthetic_parcels_noprj_shp.zip`.
@@ -206,7 +223,7 @@ Other fixtures: `adjacent_touching` (expected: no conflict), `duplicate_of_mo5`,
 - One parcel per registration case. Bulk import exists only for legacy migration, where holders are documented rather than registered. Documented interests become registered through a confirmation case.
 - Migration creates a new unverified party for every holder name; it never matches names to existing parties automatically, so de-duplicating parties is a manual follow-up. Subdivision accepts up to 50 new parcels per case.
 - Subdivision and consolidation give every resulting parcel the same land category and use, set on the case.
-- No malware scanning of uploads (the hook point is marked in `routes/cases.ts`) and no e-mail or SMS notifications; landowners check request status in the portal.
+- No malware scanning of uploads (the hook point is marked in `services/applications.ts`). There are no e-mail or SMS notifications: landowners check request status in the portal, and information requests to applicants are recorded as not sent unless staff deliver them. Application categories and requirements are working defaults, not the land authority's checklist; there are no retention or archival schedules (nothing is deleted); and district and locality are free text.
 - Released documents are the stored files themselves; there is no certified-copy watermarking or fee handling.
 - Conflict tolerances (`OVERLAP_TOLERANCE_M2`, `DUPLICATE_HAUSDORFF_M`, `MIN_PARCEL_AREA_M2`, `COVERAGE_TOLERANCE_M2`) and the public field list (`PUBLIC_PARCEL_FIELDS`) are placeholders until the cadastral authority and the disclosure policy define them.
 - The audit chain resists tampering by application users, but a database superuser can still alter it. For higher assurance, run `server/db/roles.sql` so the app uses a least-privilege role, and ship events to a separate log store.

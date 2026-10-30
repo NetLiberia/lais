@@ -281,6 +281,7 @@ export const SUMMARIES: Record<string, string> = {
   'GET /processor/summary': "Processor dashboard: twelve indicators for your counties and the selected period.",
   'GET /processor/returned': "Applications returned by validation, a supervisor or a registrar, and open GIS clarification requests.",
   'GET /processor/decisions': "Registrar decision tracking (read-only, from the registrar's records).",
+  'GET /processor/activity': 'Recent workflow events across the applications in your counties.',
   'GET /processor/gis-queue': "Your GIS handoffs and the state of their GIS tasks.",
   'GET /processor/analytics': "Chart data: registrations over time, categories, stages, missing documents, information requests, handoffs, returns and processing time.",
   'GET /processor/reports': "The available processing reports.",

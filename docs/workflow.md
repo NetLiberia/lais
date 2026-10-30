@@ -6,6 +6,8 @@ This guide covers how applications move through LAIS, where supervisors fit in, 
 - Approving, rejecting and publishing stay with the Land Registrar of the county.
 - No supervisory action changes geometry, rights or a published record.
 
+Before a case reaches GIS work or review, **processors** register it as an application and process its documents. Their completeness checks are administrative, not legal verification. See [application-processing.md](application-processing.md): registration, document review, completeness gates and exceptions, information requests, the GIS handoff, returns and decision tracking.
+
 ## The case workflow
 
 Case statuses are enforced twice: by the API, and by the database trigger `lais.enforce_case_transition`.
