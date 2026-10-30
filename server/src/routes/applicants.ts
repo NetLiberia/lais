@@ -4,7 +4,7 @@ import { pool, tx } from '../db.js';
 import { badRequest, conflict, notFound, parseId } from '../http.js';
 import { writeAudit } from '../audit.js';
 import { enforce } from '../authz/enforce.js';
-import { authorize } from '../authz/policy.js';
+import { authorize, scopeFor } from '../authz/policy.js';
 import { maskEmail, maskPhone } from '../services/applications.js';
 import { resolveScope } from '../services/supervision.js';
 import { documentBody, documentQuery } from '../openapi.js';
@@ -40,7 +40,11 @@ applicantsRouter.get('/', async (req, res) => {
   const q = listQuery.parse(req.query);
   const counties = resolveScope(req, 'applicant.view', q.countyId);
   // Contact search only for officers who may see contact details; otherwise the term matches names and numbers only.
-  const contactScope = counties === null ? null : counties.filter((c) => contactAllowed(req, c));
+  // Counties where the officer may see contact details, intersected with the listed counties. A national
+  // view does not imply contact access: that needs its own (national or county) permission.
+  const contactGrant = scopeFor(req.auth!.principal, 'applicant.view_contact');
+  const contactScope: number[] | null = contactGrant === 'all' ? counties
+    : counties === null ? contactGrant : counties.filter((c) => contactGrant.includes(c));
   const searchContact = !!q.q && (contactScope === null || contactScope.length > 0);
   const { rows } = await pool.query(
     `SELECT a.id, a.applicant_no, a.applicant_type, a.name, a.phone, a.email, a.county_id, co.code AS county_code, a.status, a.created_at, a.updated_at,

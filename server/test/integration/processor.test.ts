@@ -155,6 +155,11 @@ describe.skipIf(!TEST_DB)('LAIS processor phase', () => {
       expect(byPhone.body.items[0].phone).toBe('+231 770 123 456');
       const supervisor = await as('sup.mo').get('/api/applicants?q=770%20123');
       expect(supervisor.body.items).toEqual([]);
+      // A national supervisor sees every county but has no contact permission: contact search must not match either.
+      const national = await as('supervisor').get('/api/applicants?q=770%20123');
+      expect(national.status).toBe(200);
+      expect(national.body.items).toEqual([]);
+      expect((await as('supervisor').get(`/api/applicants?q=${encodeURIComponent('Applicant')}`)).body.items[0].phone).toMatch(/\*\*\*/);
       const masked = (await as('sup.mo').get(`/api/applicants/${applicantId}`)).body.applicant;
       expect(masked.phone).toMatch(/\*\*\*/);
       expect(masked.email).toMatch(/^c\*\*\*@/);
